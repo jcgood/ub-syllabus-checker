@@ -150,16 +150,33 @@
         "undergraduate": "required",
         "graduate": "required"
       },
-      "description": "How graded components combine into a final grade, relative weightings, a test make-up policy, the level of work required for each letter grade (or pass/fail), a reminder of students' responsibility to participate in course evaluations -- AND a reference to the correct Incomplete Policy. CONFLICT: undergraduate and graduate students are governed by two DIFFERENT Incomplete Policies at two different URLs; see `note`.",
+      "description": "How graded components combine into a final grade, relative weightings, a test make-up policy, the level of work required for each letter grade (or pass/fail), and a reminder of students' responsibility to participate in course evaluations. (The Incomplete Policy reference is a separate, dedicated element below -- split out because the two are governed by different, conflicting UB policies per level, and lumping them together obscured which specific part of a syllabus was actually missing.)",
       "detect": [
-        "incomplete[\\s-]polic",
-        "incomplete\\s+grade",
         "course evaluation",
         "grade breakdown",
         "grading scale",
         "final grade scale",
         "grade distribution",
         "points each"
+      ],
+      "texts": {},
+      "note": ""
+    },
+    {
+      "id": "incomplete-policy",
+      "title": "Incomplete Policy",
+      "levels": [
+        "undergraduate",
+        "graduate"
+      ],
+      "requirement": {
+        "undergraduate": "required",
+        "graduate": "required"
+      },
+      "description": "A reference to the correct Incomplete ('I' grade) Policy for students who cannot complete coursework by the end of the term. CONFLICT: undergraduate and graduate students are governed by two DIFFERENT Incomplete Policies at two different URLs; see `note`. Split out from Grading Policy (2026-09) since a syllabus can satisfy one without the other, and a single combined pass/fail flag couldn't say which.",
+      "detect": [
+        "incomplete[\\s-]polic",
+        "incomplete\\s+grade"
       ],
       "texts": {
         "undergraduate": [

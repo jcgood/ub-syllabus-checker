@@ -147,7 +147,14 @@
       thresholds, late-submission penalties, a Final Grade Scale's cutoff
       ranges) that would otherwise produce a confidently wrong total. Reports
       "n/a" for a points-based breakdown (no percentages to check) or when no
-      "Grading" heading can be found at all.</p>
+      "Grading" heading can be found at all. A grading table that reconciles
+      to 100% here also counts as positive evidence for the separate "Grading
+      Policy" required-element check below, even when no specific phrase like
+      "course evaluation" or "grade breakdown" is present.</p>
+      <p><strong>"Grading Policy" and "Incomplete Policy" are two separate checks</strong>,
+      not one — the two are governed by different, sometimes conflicting UB
+      policies per level, and lumping them into a single pass/fail flag made
+      it unclear which part of a syllabus was actually missing.</p>
       <p><strong>Which policy level applies (undergraduate/graduate) is auto-detected</strong>
       from the course number stated on the syllabus's first page, per UB's own numbering
       convention (100–499 undergraduate, 500+ graduate) — a dual-listed course
@@ -328,11 +335,20 @@ function firstSentence(text) {
   return idx !== -1 ? text.slice(0, idx + 1) : text;
 }
 function checkSyllabus(text, levels, elements) {
+  // grading-policy gets one extra, non-regex signal: an actual
+  // reconciled percentage grading table is at least as strong evidence
+  // this element exists as any of its plain-text detect patterns --
+  // see check_syllabus.py's check_syllabus() for the full rationale.
+  const gradingWeightsOk = checkGradingWeights(text).status === "ok";
+
   const missing = [];
   for (const element of elements) {
     if (applicableLevels(element, levels).length === 0) continue;
     if (!isRequired(element, levels)) continue;
-    const detected = element.detect.some((pattern) => new RegExp(pattern, "i").test(text));
+    let detected = element.detect.some((pattern) => new RegExp(pattern, "i").test(text));
+    if (!detected && element.id === "grading-policy" && gradingWeightsOk) {
+      detected = true;
+    }
     if (!detected) {
       missing.push({ title: element.title, reason: firstSentence(element.description) });
     }

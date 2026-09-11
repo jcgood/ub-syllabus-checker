@@ -1,0 +1,626 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UB Syllabus Compliance Checker</title>
+<style>
+  :root {
+    color-scheme: light;
+    --ub-blue: #005bbb;
+    --ub-blue-dark: #003d80;
+    --text: #1a1a1a;
+    --muted: #555555;
+    --border: #d5dbe2;
+    --bg-tint: #f4f7fb;
+    --bad: #a6011a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: Arial, Helvetica, sans-serif;
+    color: var(--text);
+    background: #ffffff;
+    line-height: 1.5;
+  }
+  a { color: var(--ub-blue-dark); }
+  header {
+    background: var(--ub-blue);
+    color: #ffffff;
+    padding: 1.5rem 1rem;
+  }
+  header .wrap { max-width: 860px; margin: 0 auto; }
+  header h1 { margin: 0 0 0.35rem 0; font-size: 1.5rem; }
+  header p { margin: 0; font-size: 0.95rem; }
+  main { max-width: 860px; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
+  section { margin-top: 1.75rem; }
+  h2 { color: var(--ub-blue-dark); border-bottom: 2px solid var(--border); padding-bottom: 0.3rem; font-size: 1.25rem; }
+  h3 { font-size: 1.05rem; margin-bottom: 0.4rem; }
+  fieldset { border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem 1rem; margin: 0 0 1rem 0; }
+  legend { font-weight: bold; padding: 0 0.4rem; }
+  label { display: inline-flex; align-items: center; gap: 0.4rem; margin-right: 1.25rem; }
+  input[type="file"] { display: block; margin: 0.5rem 0 1rem 0; max-width: 100%; }
+  button {
+    background: var(--ub-blue);
+    color: #ffffff;
+    border: none;
+    border-radius: 6px;
+    padding: 0.6rem 1.1rem;
+    font-size: 1rem;
+    cursor: pointer;
+  }
+  button:hover, button:focus-visible { background: var(--ub-blue-dark); }
+  button:disabled { background: #9aa7b4; cursor: not-allowed; }
+  button.secondary { background: #ffffff; color: var(--ub-blue-dark); border: 2px solid var(--ub-blue); }
+  button.secondary:hover, button.secondary:focus-visible { background: var(--bg-tint); }
+  #status { margin-top: 0.75rem; font-weight: bold; min-height: 1.2em; }
+  #status[data-state="error"] { color: var(--bad); }
+  table.summary-table { border-collapse: collapse; width: 100%; margin-bottom: 1rem; }
+  table.summary-table caption { text-align: left; font-weight: bold; margin-bottom: 0.4rem; }
+  table.summary-table th, table.summary-table td {
+    border: 1px solid var(--border);
+    padding: 0.5rem 0.65rem;
+    text-align: left;
+  }
+  table.summary-table th { background: var(--bg-tint); }
+  .course-block { border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1.25rem; background: #fdfefe; }
+  .page-info { color: var(--muted); font-style: italic; margin-top: -0.4rem; }
+  ul.finding-list { padding-left: 1.4rem; }
+  ul.finding-list li { margin-bottom: 0.35rem; }
+  .count-tag { color: var(--muted); font-style: italic; }
+  details.about { border: 1px solid var(--border); border-radius: 6px; padding: 0.6rem 1rem; }
+  details.about summary { cursor: pointer; font-weight: bold; }
+  details.about ul { padding-left: 1.3rem; }
+  footer { max-width: 860px; margin: 0 auto; padding: 1rem; color: var(--muted); font-size: 0.85rem; }
+  .visually-hidden {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <h1>UB Syllabus Compliance Checker</h1>
+    <p>Checks a graduate course-approval PDF against UB's syllabus policy elements and a lightweight PDF accessibility screen — entirely in your browser.</p>
+  </div>
+</header>
+
+<main>
+  <section id="privacy-note">
+    <p><strong>Nothing you upload leaves your computer.</strong> This page runs entirely in your browser (no server, no upload) — the PDF is read locally by your browser's own JavaScript engine.</p>
+  </section>
+
+  <section id="upload-section">
+    <h2>Check a syllabus</h2>
+    <form id="check-form">
+      <div>
+        <label for="file-input" style="display:block; font-weight:bold; margin-bottom:0.3rem;">
+          Course-approval PDF(s) — cover form + syllabus
+        </label>
+        <input type="file" id="file-input" accept="application/pdf" multiple>
+      </div>
+
+      <fieldset>
+        <legend>Which UB policy level(s) apply?</legend>
+        <label><input type="checkbox" id="level-undergraduate"> Undergraduate</label>
+        <label><input type="checkbox" id="level-graduate" checked> Graduate</label>
+      </fieldset>
+
+      <button type="submit" id="check-btn">Check syllabus(es)</button>
+    </form>
+    <p id="status" role="status" aria-live="polite"></p>
+  </section>
+
+  <section id="results-section" hidden aria-live="polite">
+    <!-- populated by JS -->
+  </section>
+
+  <section>
+    <details class="about">
+      <summary>About this tool &amp; its limitations</summary>
+      <p>
+        This checks syllabus content against UB's official
+        <a href="https://undergrad.buffalo.edu/faculty-staff-pw/curriculum/syllabus.html">undergraduate</a>
+        and
+        <a href="https://www.buffalo.edu/grad/intranet/curriculum/course-creation/syllabus-guidelines.html">graduate</a>
+        syllabus policy pages. It automatically detects and excludes a "New
+        Graduate Course Approval Request Form" cover form if one precedes
+        the syllabus in the PDF.
+      </p>
+      <p><strong>This is a heuristic gap-flagger, not an authoritative compliance determination.</strong>
+      A "detected" element may be a false match; a "missing" one may just be phrased unexpectedly.
+      Always read the flagged section of the real document before acting on a finding.</p>
+      <p><strong>The accessibility check here is deliberately degraded</strong> compared to the
+      full desktop version of this tool (which uses veraPDF's authoritative PDF/UA-1 / ISO 14289-1
+      validator). This browser-only version can only check, using the PDF's own tag structure where present:</p>
+      <ul>
+        <li>Whether the PDF is flagged as a tagged PDF at all</li>
+        <li>Whether the document has a title set in its metadata</li>
+        <li>Whether the document appears to declare a language (approximate, byte-level check)</li>
+        <li>Images/figures with no alt-text description</li>
+        <li>Hyperlinks with no accessible description text</li>
+        <li>Tables with inconsistent row/column structure</li>
+      </ul>
+      <p>It does <strong>not</strong> check font embedding, table header scope attributes, or
+      full per-element tagging coverage the way the desktop veraPDF-based tool does. Treat a
+      clean result here as "no obvious problems found," not "accessible."</p>
+    </details>
+  </section>
+</main>
+
+<footer>
+  <p>Client-side only — built with <a href="https://mozilla.github.io/pdf.js/">pdf.js</a> and
+  <a href="https://docx.js.org/">docx.js</a>. Source: UB Academic Affairs internal tooling.</p>
+</footer>
+
+<script type="module">
+import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.min.mjs";
+import {
+  Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow,
+  TableCell, WidthType, AlignmentType,
+} from "https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.mjs";
+
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.worker.min.mjs";
+
+const fileInput = document.getElementById("file-input");
+const form = document.getElementById("check-form");
+const checkBtn = document.getElementById("check-btn");
+const statusEl = document.getElementById("status");
+const resultsSection = document.getElementById("results-section");
+
+let standardsCache = null;
+let lastCourses = null;
+
+function setStatus(msg, isError) {
+  statusEl.textContent = msg;
+  statusEl.dataset.state = isError ? "error" : "ok";
+}
+
+async function loadStandards() {
+  if (!standardsCache) {
+    const res = await fetch("standards.json");
+    if (!res.ok) throw new Error("Could not load standards.json (" + res.status + ")");
+    standardsCache = await res.json();
+  }
+  return standardsCache;
+}
+
+// ---- Cover-form boundary detection, ported from pdf_extract.py ----
+const FORM_TITLE_MARKER = "new graduate course approval request form";
+const FORM_SECTION_MARKERS = [
+  FORM_TITLE_MARKER,
+  "basic catalog information",
+  "description for hub catalog",
+  "duplication check:",
+  "cross-listing/dual listing",
+  "student learning outcomes (slos): please list",
+  "generative ai tools: please include a",
+  "academic department approval:",
+  "academic dean approval:",
+  "the graduate school:",
+  "action of divisional/area committee",
+];
+
+function isFormPage(text) {
+  const lower = text.toLowerCase();
+  return FORM_SECTION_MARKERS.some((m) => lower.includes(m));
+}
+
+function findSyllabusStartPage(pages) {
+  if (!pages.length || !pages[0].toLowerCase().includes(FORM_TITLE_MARKER)) return 0;
+  let i = 0;
+  while (i < pages.length && isFormPage(pages[i])) i++;
+  return i;
+}
+
+// ---- PDF text extraction via pdf.js ----
+async function loadPdfPages(arrayBuffer) {
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const pages = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    // pdf.js returns many small, often per-run text items; joining them
+    // with a single space each still produces irregular runs of multiple
+    // spaces wherever the PDF itself breaks a word/phrase across items
+    // (e.g. "Course   Description" instead of "Course Description"),
+    // which silently breaks every literal-substring detect pattern in
+    // standards.json (ported as-is from syllabus_standards.py, written
+    // against pdftotext's normally-spaced output). Collapse to single
+    // spaces so those patterns match the same way they do in the
+    // Python/pdftotext-based tool.
+    pages.push(content.items.map((it) => it.str).join(" ").replace(/\s+/g, " "));
+  }
+  return { pdf, pages };
+}
+
+// ---- Required-element check, ported from check_syllabus.py / syllabus_standards.py ----
+function applicableLevels(element, levels) {
+  return levels.filter((l) => element.levels.includes(l));
+}
+function isRequired(element, levels) {
+  return levels.some((l) => element.requirement[l] === "required");
+}
+function firstSentence(text) {
+  text = text.trim();
+  const idx = text.indexOf(". ");
+  return idx !== -1 ? text.slice(0, idx + 1) : text;
+}
+function checkSyllabus(text, levels, elements) {
+  const missing = [];
+  for (const element of elements) {
+    if (applicableLevels(element, levels).length === 0) continue;
+    if (!isRequired(element, levels)) continue;
+    const detected = element.detect.some((pattern) => new RegExp(pattern, "i").test(text));
+    if (!detected) {
+      missing.push({ title: element.title, reason: firstSentence(element.description) });
+    }
+  }
+  return missing;
+}
+
+// ---- Degraded PDF/UA-ish accessibility check ----
+function walkStructTree(node, cb) {
+  if (!node) return;
+  cb(node);
+  for (const child of node.children || []) walkStructTree(child, cb);
+}
+
+async function bytesContainLangKey(arrayBuffer) {
+  // Approximate, whole-file byte scan for a /Lang key -- pdf.js has no
+  // direct accessor for the document Catalog's /Lang entry (only XMP
+  // metadata fields), so this substitutes a loose regex over the raw
+  // PDF bytes, in the same spirit as this repo's other "loose regex"
+  // heuristic checks. Can false-negative on a compressed object stream
+  // (a /Lang key inside a compressed xref/object stream won't appear as
+  // literal bytes) and can't confirm the key is on the actual Catalog
+  // rather than some unrelated dictionary -- flagged as approximate in
+  // the UI for this reason.
+  const bytes = new Uint8Array(arrayBuffer);
+  let text = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    text += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  }
+  return /\/Lang\s*[(/]/.test(text);
+}
+
+async function accessibilityCheck(pdf, arrayBuffer, startPage) {
+  const findings = [];
+
+  const markInfo = await pdf.getMarkInfo().catch(() => null);
+  if (!markInfo || !markInfo.Marked) {
+    findings.push({ label: "PDF is not flagged as a tagged PDF at all", count: 1 });
+  }
+
+  const meta = await pdf.getMetadata().catch(() => null);
+  const title = meta?.info?.Title || meta?.metadata?.get?.("dc:title");
+  if (!title || !String(title).trim()) {
+    findings.push({ label: "Document has no title set in its metadata", count: 1 });
+  }
+
+  const hasLang = await bytesContainLangKey(arrayBuffer);
+  if (!hasLang) {
+    findings.push({ label: "Document does not appear to declare a language (approximate check)", count: 1 });
+  }
+
+  let linkNoDesc = 0;
+  let missingAlt = 0;
+  let tableMismatch = 0;
+
+  for (let i = startPage; i < pdf.numPages; i++) {
+    const page = await pdf.getPage(i + 1);
+
+    const annots = await page.getAnnotations().catch(() => []);
+    for (const a of annots) {
+      if (a.subtype === "Link") {
+        const hasDesc = (a.contents && a.contents.trim()) || (a.alternativeText && a.alternativeText.trim());
+        if (!hasDesc) linkNoDesc++;
+      }
+    }
+
+    const tree = await page.getStructTree().catch(() => null);
+    if (tree) {
+      walkStructTree(tree, (node) => {
+        const role = node.role || "";
+        if (/Figure/i.test(role)) {
+          if (!node.alt || !String(node.alt).trim()) missingAlt++;
+        }
+        if (/^Table$/i.test(role)) {
+          // TR rows sit under THead/TBody/TFoot wrapper nodes, not
+          // directly under Table -- collect them from anywhere among
+          // Table's descendants rather than only direct children.
+          const rows = [];
+          walkStructTree(node, (n) => {
+            if (/^TR$/i.test(n.role || "")) rows.push(n);
+          });
+          const rowCounts = rows
+            .map((tr) => (tr.children || []).filter((c) => /^T[DH]$/i.test(c.role || "")).length)
+            .filter((n) => n > 0);
+          if (new Set(rowCounts).size > 1) tableMismatch++;
+        }
+      });
+    }
+  }
+
+  if (linkNoDesc > 0) findings.push({ label: "Hyperlink(s) have no accessible description text", count: linkNoDesc });
+  if (missingAlt > 0) findings.push({ label: "Image/figure(s) missing an alt-text description", count: missingAlt });
+  if (tableMismatch > 0) findings.push({ label: "Table structure is malformed (inconsistent column counts per row)", count: tableMismatch });
+
+  return findings;
+}
+
+// ---- Rendering ----
+function courseLabel(filename) {
+  const stem = filename.replace(/\.pdf$/i, "");
+  const idx = stem.indexOf("_");
+  if (idx === -1) return stem;
+  return `${stem.slice(0, idx).trim()} — ${stem.slice(idx + 1).trim()}`;
+}
+
+function el(tag, opts = {}, children = []) {
+  const node = document.createElement(tag);
+  if (opts.text !== undefined) node.textContent = opts.text;
+  if (opts.className) node.className = opts.className;
+  for (const [k, v] of Object.entries(opts.attrs || {})) node.setAttribute(k, v);
+  for (const child of children) node.appendChild(child);
+  return node;
+}
+
+function renderResults(courses) {
+  resultsSection.innerHTML = "";
+  resultsSection.hidden = false;
+
+  resultsSection.appendChild(el("h2", { text: "Summary" }));
+  const table = el("table", { className: "summary-table" });
+  const thead = el("thead", {}, [
+    el("tr", {}, [
+      el("th", { text: "Course", attrs: { scope: "col" } }),
+      el("th", { text: "Missing required elements", attrs: { scope: "col" } }),
+      el("th", { text: "Accessibility issues", attrs: { scope: "col" } }),
+    ]),
+  ]);
+  table.appendChild(thead);
+  const tbody = el("tbody");
+  for (const c of courses) {
+    const accCount = c.error ? 0 : c.accessibilityFindings.reduce((s, f) => s + f.count, 0);
+    tbody.appendChild(
+      el("tr", {}, [
+        el("td", { text: c.label }),
+        el("td", { text: c.error ? "n/a" : String(c.missingRequired.length) }),
+        el("td", { text: c.error ? "n/a" : String(accCount) }),
+      ])
+    );
+  }
+  table.appendChild(tbody);
+  resultsSection.appendChild(table);
+
+  for (const c of courses) {
+    const block = el("div", { className: "course-block" });
+    block.appendChild(el("h2", { text: c.label }));
+
+    if (c.error) {
+      block.appendChild(el("p", { text: "Could not be checked: " + c.error }));
+      resultsSection.appendChild(block);
+      continue;
+    }
+
+    block.appendChild(
+      el("p", {
+        className: "page-info",
+        text: `Cover form: page(s) 1–${c.startPage}; syllabus content: page(s) ${c.startPage + 1}–${c.totalPages}.`,
+      })
+    );
+
+    block.appendChild(el("h3", { text: "Missing / Incomplete Syllabus Elements" }));
+    if (c.missingRequired.length) {
+      const ul = el("ul", { className: "finding-list" });
+      for (const item of c.missingRequired) {
+        ul.appendChild(
+          el("li", {}, [el("strong", { text: item.title + ": " }), document.createTextNode(item.reason)])
+        );
+      }
+      block.appendChild(ul);
+    } else {
+      block.appendChild(el("p", { text: "No required elements missing." }));
+    }
+
+    block.appendChild(el("h3", { text: "PDF Accessibility (ADA / PDF-UA) Issues — degraded check" }));
+    if (c.accessibilityFindings.length) {
+      const ul = el("ul", { className: "finding-list" });
+      for (const f of c.accessibilityFindings) {
+        ul.appendChild(
+          el("li", {}, [
+            document.createTextNode(f.label + " "),
+            el("span", { className: "count-tag", text: `(${f.count} occurrence(s))` }),
+          ])
+        );
+      }
+      block.appendChild(ul);
+    } else {
+      block.appendChild(el("p", { text: "No accessibility issues detected in the syllabus pages (degraded check)." }));
+    }
+
+    resultsSection.appendChild(block);
+  }
+
+  resultsSection.appendChild(
+    el("button", { text: "Download report (.docx)", className: "secondary", attrs: { type: "button", id: "download-btn" } })
+  );
+  document.getElementById("download-btn").addEventListener("click", () => downloadDocx(courses));
+}
+
+// ---- docx generation ----
+async function buildDocx(courses) {
+  const children = [];
+  children.push(new Paragraph({ text: "Graduate Syllabus Review", heading: HeadingLevel.TITLE, alignment: AlignmentType.CENTER }));
+  children.push(
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      children: [new TextRun({ text: `Required-element and PDF accessibility findings — ${courses.length} course(s)`, italics: true })],
+    })
+  );
+  children.push(
+    new Paragraph({
+      text:
+        "Scope: syllabus content only, checked against UB's Graduate Course Syllabus Guidelines. " +
+        "Each PDF's “New Graduate Course Approval Request Form” cover pages are excluded from both checks. " +
+        "This browser-based tool runs a heuristic content check plus a DEGRADED accessibility screen " +
+        "(no full PDF/UA-1 validation) — confirm findings against the actual document before acting on them.",
+    })
+  );
+
+  children.push(new Paragraph({ text: "Summary", heading: HeadingLevel.HEADING_1 }));
+  const headerRow = new TableRow({
+    children: ["Course", "Missing required elements", "Accessibility issues"].map(
+      (t) => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: t, bold: true })] })] })
+    ),
+  });
+  const dataRows = courses.map((c) => {
+    const accCount = c.error ? 0 : c.accessibilityFindings.reduce((s, f) => s + f.count, 0);
+    return new TableRow({
+      children: [
+        c.label,
+        c.error ? "n/a" : String(c.missingRequired.length),
+        c.error ? "n/a" : String(accCount),
+      ].map((t) => new TableCell({ children: [new Paragraph(t)] })),
+    });
+  });
+  children.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: [headerRow, ...dataRows] }));
+
+  for (const c of courses) {
+    children.push(new Paragraph({ text: c.label, heading: HeadingLevel.HEADING_1 }));
+    if (c.error) {
+      children.push(new Paragraph("Could not be checked: " + c.error));
+      continue;
+    }
+    children.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            italics: true,
+            text: `Cover form: page(s) 1–${c.startPage}; syllabus content: page(s) ${c.startPage + 1}–${c.totalPages}.`,
+          }),
+        ],
+      })
+    );
+
+    children.push(new Paragraph({ text: "Missing / Incomplete Syllabus Elements", heading: HeadingLevel.HEADING_2 }));
+    if (c.missingRequired.length) {
+      for (const item of c.missingRequired) {
+        children.push(
+          new Paragraph({
+            bullet: { level: 0 },
+            children: [new TextRun({ text: item.title + ": ", bold: true }), new TextRun(item.reason)],
+          })
+        );
+      }
+    } else {
+      children.push(new Paragraph("No required elements missing."));
+    }
+
+    children.push(new Paragraph({ text: "PDF Accessibility (ADA / PDF-UA) Issues — degraded check", heading: HeadingLevel.HEADING_2 }));
+    if (c.accessibilityFindings.length) {
+      for (const f of c.accessibilityFindings) {
+        children.push(
+          new Paragraph({
+            bullet: { level: 0 },
+            children: [new TextRun(f.label + " "), new TextRun({ text: `(${f.count} occurrence(s))`, italics: true })],
+          })
+        );
+      }
+    } else {
+      children.push(new Paragraph("No accessibility issues detected in the syllabus pages (degraded check)."));
+    }
+  }
+
+  const doc = new Document({ sections: [{ children }] });
+  return Packer.toBlob(doc);
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function downloadDocx(courses) {
+  setStatus("Building .docx report…");
+  try {
+    const blob = await buildDocx(courses);
+    downloadBlob(blob, "syllabus_review_report.docx");
+    setStatus("Report downloaded.");
+  } catch (err) {
+    console.error(err);
+    setStatus("Could not build the .docx report: " + err.message, true);
+  }
+}
+
+// ---- Orchestration ----
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const files = Array.from(fileInput.files || []);
+  if (!files.length) {
+    setStatus("Choose at least one PDF first.", true);
+    return;
+  }
+  const levels = [];
+  if (document.getElementById("level-undergraduate").checked) levels.push("undergraduate");
+  if (document.getElementById("level-graduate").checked) levels.push("graduate");
+  if (!levels.length) {
+    setStatus("Choose at least one policy level.", true);
+    return;
+  }
+
+  checkBtn.disabled = true;
+  resultsSection.hidden = true;
+  try {
+    setStatus("Loading policy standards…");
+    const { elements } = await loadStandards();
+
+    const courses = [];
+    for (const file of files) {
+      setStatus(`Processing ${file.name}…`);
+      try {
+        const buf = await file.arrayBuffer();
+        // pdf.js takes ownership of (detaches) the ArrayBuffer passed to
+        // getDocument -- pass it a copy so `buf` stays readable afterward
+        // for accessibilityCheck's own raw-byte language scan.
+        const { pdf, pages } = await loadPdfPages(buf.slice(0));
+        const startPage = findSyllabusStartPage(pages);
+        const syllabusText = pages.slice(startPage).join("\n");
+        const missingRequired = checkSyllabus(syllabusText, levels, elements);
+        const accessibilityFindings = await accessibilityCheck(pdf, buf, startPage);
+        courses.push({
+          label: courseLabel(file.name),
+          startPage,
+          totalPages: pdf.numPages,
+          missingRequired,
+          accessibilityFindings,
+        });
+      } catch (err) {
+        console.error(err);
+        courses.push({ label: courseLabel(file.name), error: err.message });
+      }
+    }
+
+    lastCourses = courses;
+    renderResults(courses);
+    setStatus(`Done — checked ${courses.length} file(s).`);
+  } catch (err) {
+    console.error(err);
+    setStatus("Something went wrong: " + err.message, true);
+  } finally {
+    checkBtn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>

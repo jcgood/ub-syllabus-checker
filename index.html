@@ -39,7 +39,34 @@
   fieldset { border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem 1rem; margin: 0 0 1rem 0; }
   legend { font-weight: bold; padding: 0 0.4rem; }
   label { display: inline-flex; align-items: center; gap: 0.4rem; margin-right: 1.25rem; }
-  input[type="file"] { display: block; margin: 0.5rem 0 1rem 0; max-width: 100%; }
+  input[type="file"] {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    margin: 0.5rem 0 1rem 0;
+    padding: 1.5rem 1rem;
+    border: 2px dashed var(--ub-blue);
+    border-radius: 8px;
+    background: var(--bg-tint);
+    color: var(--text);
+    font-size: 1rem;
+    cursor: pointer;
+  }
+  input[type="file"]:hover { background: #e9f0f8; }
+  input[type="file"]:focus-visible { outline: 3px solid var(--ub-blue-dark); outline-offset: 2px; }
+  input[type="file"]::file-selector-button,
+  input[type="file"]::-webkit-file-upload-button {
+    background: var(--ub-blue);
+    color: #ffffff;
+    border: none;
+    border-radius: 6px;
+    padding: 0.6rem 1.1rem;
+    font-size: 1rem;
+    margin-right: 1rem;
+    cursor: pointer;
+  }
+  input[type="file"]::file-selector-button:hover,
+  input[type="file"]::-webkit-file-upload-button:hover { background: var(--ub-blue-dark); }
   button {
     background: var(--ub-blue);
     color: #ffffff;
@@ -98,7 +125,8 @@
         <label for="file-input" style="display:block; font-weight:bold; margin-bottom:0.3rem;">
           Syllabus file(s) — PDF (cover form + syllabus) or .docx
         </label>
-        <input type="file" id="file-input" accept="application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple>
+        <input type="file" id="file-input" aria-describedby="file-input-help" accept="application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple>
+        <p id="file-input-help" style="margin: -0.75rem 0 1rem 0; color: var(--muted); font-size: 0.9rem;">Click to browse, or drag and drop files here. Multiple files OK.</p>
       </div>
 
       <fieldset>
@@ -287,18 +315,26 @@ async function loadPdfPages(arrayBuffer) {
 
 // ---- Course-level auto-detection, ported from level_detection.py ----
 // UB numbering convention: 100-499 undergraduate, 500+ graduate. Scoped
-// to the first syllabus page only -- see level_detection.py's docstring
-// for why (avoids picking up an unrelated course number mentioned deep
-// in a prerequisites section or reading list).
-const COURSE_NUMBER_RE = /\b([A-Z]{2,5})\s?(\d{3})(?:\s*\/\s*(\d{3}))?\b/g;
+// to the first syllabus page (plus the uploaded filename, which this
+// workflow's real samples always name with the course's abbreviated
+// subject code even when the document body spells it out in full) --
+// see level_detection.py's docstring for why (avoids picking up an
+// unrelated course number mentioned deep in a prerequisites section or
+// reading list). The 2-15 letter prefix bound (not a real UB subject
+// code's usual 2-5) is wide enough to also catch a fully spelled-out
+// ALL-CAPS subject name ("HISTORY 484") -- found for real in a syllabus
+// this otherwise missed entirely.
+const COURSE_NUMBER_RE = /\b([A-Z]{2,15})\s?(\d{3})(?:\s*\/\s*(\d{3}))?\b/g;
 
-function detectCourseLevels(firstPageText) {
+function detectCourseLevels(firstPageText, filename) {
+  const candidateText = filename ? `${filename}\n${firstPageText}` : firstPageText;
   const re = new RegExp(COURSE_NUMBER_RE.source, "g");
   const codes = [];
   const numbers = [];
   let m;
-  while ((m = re.exec(firstPageText)) !== null) {
-    codes.push(m[0].trim());
+  while ((m = re.exec(candidateText)) !== null) {
+    const code = m[0].trim();
+    if (!codes.includes(code)) codes.push(code);
     numbers.push(parseInt(m[2], 10));
     if (m[3]) numbers.push(parseInt(m[3], 10));
   }
@@ -844,7 +880,7 @@ form.addEventListener("submit", async (e) => {
 
         let levels, levelsReason;
         if (autoMode) {
-          ({ levels, reason: levelsReason } = detectCourseLevels(extracted.firstPageForLevel));
+          ({ levels, reason: levelsReason } = detectCourseLevels(extracted.firstPageForLevel, file.name));
         } else {
           levels = manualLevels;
           levelsReason = "Manually set to: " + manualLevels.join(", ") + ".";

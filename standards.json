@@ -153,7 +153,12 @@
       "description": "How graded components combine into a final grade, relative weightings, a test make-up policy, the level of work required for each letter grade (or pass/fail), a reminder of students' responsibility to participate in course evaluations -- AND a reference to the correct Incomplete Policy. CONFLICT: undergraduate and graduate students are governed by two DIFFERENT Incomplete Policies at two different URLs; see `note`.",
       "detect": [
         "incomplete[\\s-]polic",
-        "course evaluation"
+        "course evaluation",
+        "grade breakdown",
+        "grading scale",
+        "final grade scale",
+        "grade distribution",
+        "points each"
       ],
       "texts": {
         "undergraduate": [

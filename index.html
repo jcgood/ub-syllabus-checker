@@ -96,9 +96,9 @@
     <form id="check-form">
       <div>
         <label for="file-input" style="display:block; font-weight:bold; margin-bottom:0.3rem;">
-          Course-approval PDF(s) — cover form + syllabus
+          Syllabus file(s) — PDF (cover form + syllabus) or .docx
         </label>
-        <input type="file" id="file-input" accept="application/pdf" multiple>
+        <input type="file" id="file-input" accept="application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple>
       </div>
 
       <fieldset>
@@ -134,10 +134,20 @@
         <a href="https://undergrad.buffalo.edu/faculty-staff-pw/curriculum/syllabus.html">undergraduate</a>
         and
         <a href="https://www.buffalo.edu/grad/intranet/curriculum/course-creation/syllabus-guidelines.html">graduate</a>
-        syllabus policy pages. It automatically detects and excludes a "New
-        Graduate Course Approval Request Form" cover form if one precedes
-        the syllabus in the PDF.
+        syllabus policy pages. Accepts PDF (a plain syllabus, or a Graduate
+        School course-approval packet — it automatically detects and
+        excludes the "New Graduate Course Approval Request Form" cover
+        pages if present) or .docx.
       </p>
+      <p><strong>Grading Weight Check:</strong> if a "Grading" section states
+      percentage-based weights (e.g. "Exams: 60%, Homework: 20%, Participation: 20%"),
+      this adds them up and flags it if they don't sum to ~100%. Deliberately
+      scoped to the located Grading section only, not the whole document —
+      a whole-document scan picks up unrelated percentages (attendance bonus
+      thresholds, late-submission penalties, a Final Grade Scale's cutoff
+      ranges) that would otherwise produce a confidently wrong total. Reports
+      "n/a" for a points-based breakdown (no percentages to check) or when no
+      "Grading" heading can be found at all.</p>
       <p><strong>Which policy level applies (undergraduate/graduate) is auto-detected</strong>
       from the course number stated on the syllabus's first page, per UB's own numbering
       convention (100–499 undergraduate, 500+ graduate) — a dual-listed course
@@ -147,9 +157,12 @@
       <p><strong>This is a heuristic gap-flagger, not an authoritative compliance determination.</strong>
       A "detected" element may be a false match; a "missing" one may just be phrased unexpectedly.
       Always read the flagged section of the real document before acting on a finding.</p>
-      <p><strong>The accessibility check here is deliberately degraded</strong> compared to the
-      full desktop version of this tool (which uses veraPDF's authoritative PDF/UA-1 / ISO 14289-1
-      validator). This browser-only version can only check, using the PDF's own tag structure where present:</p>
+      <p><strong>The accessibility check only applies to PDF uploads</strong> — PDF/UA is a
+      PDF-specific standard, so a .docx file has nothing to check this way; export it to PDF
+      first if you need this part. Even for a PDF, this check is deliberately degraded compared
+      to the full desktop version of this tool (which uses veraPDF's authoritative PDF/UA-1 /
+      ISO 14289-1 validator). This browser-only version can only check, using the PDF's own
+      tag structure where present:</p>
       <ul>
         <li>Whether the PDF is flagged as a tagged PDF at all</li>
         <li>Whether the document has a title set in its metadata</li>
@@ -166,11 +179,17 @@
 </main>
 
 <footer>
-  <p>Client-side only — built with <a href="https://mozilla.github.io/pdf.js/">pdf.js</a> and
-  <a href="https://docx.js.org/">docx.js</a>. Source: UB Academic Affairs internal tooling.</p>
+  <p>Client-side only — built with <a href="https://mozilla.github.io/pdf.js/">pdf.js</a>,
+  <a href="https://docx.js.org/">docx.js</a>, and
+  <a href="https://github.com/mwilliamson/mammoth.js">mammoth.js</a>. Source: UB Academic Affairs internal tooling.</p>
 </footer>
 
+<script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
 <script type="module">
+// mammoth.js above is a classic (non-module) UMD script that sets
+// window.mammoth -- a module script can still read it, since `type=module`
+// only isolates the module's own top-level scope, not the shared `window`.
+const mammoth = window.mammoth;
 import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.min.mjs";
 import {
   Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow,
@@ -321,6 +340,86 @@ function checkSyllabus(text, levels, elements) {
   return missing;
 }
 
+// ---- Grading-weight-sums-to-100% check, ported from grading_check.py ----
+// See that module's docstring for why this is scoped to a located
+// "Grading" section rather than scanning the whole document (a
+// whole-document scan picks up unrelated percentages -- attendance
+// bonus thresholds, late-penalty deductions, Final Grade Scale cutoff
+// ranges, even pasted-in email MIME source in one real sample -- and
+// silently produces a confidently wrong total).
+const GRADING_SECTION_START_RE = /(?:^|\n)[ \t]*(?:Grading(?:\s+Policy)?|Grade\s+Breakdown|Grading\s+Scale)\s*:?[ \t]*/i;
+const GRADING_SECTION_STOP_RE = /(?:^|\n)[ \t]*(?:Course\s+Schedule|Weekly\s+Schedule|Course\s+Policies|UB\s+and\s+Classroom\s+Policies|Important\s+Dates|Week\s*1\b|Module\s*1\b)/i;
+const GRADING_MAX_SECTION_CHARS = 3000;
+const RANGE_PCT_RE = /\d[\d.]*\s*[-–—]\s*\d[\d.]*\s*%/g;
+const PCT_RE = /(\d{1,3}(?:\.\d+)?)\s?%/g;
+const GRADING_TOLERANCE = 2.0;
+
+function findGradingSection(text) {
+  const startMatch = GRADING_SECTION_START_RE.exec(text);
+  if (!startMatch) return null;
+  const start = startMatch.index + startMatch[0].length;
+  const stopMatch = GRADING_SECTION_STOP_RE.exec(text.slice(start));
+  const relEnd = stopMatch ? stopMatch.index : GRADING_MAX_SECTION_CHARS;
+  const end = start + Math.min(relEnd, GRADING_MAX_SECTION_CHARS);
+  return text.slice(start, end);
+}
+
+function checkGradingWeights(text) {
+  const section = findGradingSection(text);
+  if (section === null) {
+    return {
+      status: "not_found",
+      percentages: [],
+      total: 0,
+      message: 'No "Grading" section heading found — could not check whether grade weights sum to 100%.',
+    };
+  }
+
+  const excludedSpans = [];
+  let rm;
+  const rangeRe = new RegExp(RANGE_PCT_RE.source, "g");
+  while ((rm = rangeRe.exec(section)) !== null) {
+    excludedSpans.push([rm.index, rm.index + rm[0].length]);
+  }
+  const inExcludedSpan = (pos) => excludedSpans.some(([s, e]) => pos >= s && pos < e);
+
+  const percentages = [];
+  let pm;
+  const pctRe = new RegExp(PCT_RE.source, "g");
+  while ((pm = pctRe.exec(section)) !== null) {
+    if (inExcludedSpan(pm.index)) continue;
+    const after = section.slice(pm.index + pm[0].length, pm.index + pm[0].length + 10);
+    if (/^\s*[A-F][+-]?\b(?!\w)/.test(after)) continue;
+    // "50% of your grade -- 12.5% EACH" -- the 12.5% is a per-item
+    // breakdown of the 50% already counted, not a separate additive
+    // component (seen for real: 50 + 12.5 + 25 + 25 = 112.5% instead
+    // of the real 50+25+25=100%).
+    if (/^\s*each\b/i.test(after)) continue;
+    percentages.push(parseFloat(pm[1]));
+  }
+
+  if (percentages.length < 2) {
+    return {
+      status: "not_found",
+      percentages,
+      total: percentages.reduce((a, b) => a + b, 0),
+      message: 'Found a "Grading" section but no clear percentage-based weight breakdown (this syllabus may use a points-based scale instead).',
+    };
+  }
+
+  const total = percentages.reduce((a, b) => a + b, 0);
+  const foundStr = percentages.map((p) => `${p}%`).join(", ");
+  if (Math.abs(total - 100) <= GRADING_TOLERANCE) {
+    return { status: "ok", percentages, total, message: `Grading weight percentages sum to ${total}% (found: ${foundStr}).` };
+  }
+  return {
+    status: "mismatch",
+    percentages,
+    total,
+    message: `Grading weight percentages sum to ${total}%, not 100% (found: ${foundStr}) — verify against the syllabus; a component may be missing, misstated, or this tool may have mis-scoped the grading section.`,
+  };
+}
+
 // ---- Degraded PDF/UA-ish accessibility check ----
 function walkStructTree(node, cb) {
   if (!node) return;
@@ -439,18 +538,21 @@ function renderResults(courses) {
     el("tr", {}, [
       el("th", { text: "Course", attrs: { scope: "col" } }),
       el("th", { text: "Missing required elements", attrs: { scope: "col" } }),
+      el("th", { text: "Grading weights", attrs: { scope: "col" } }),
       el("th", { text: "Accessibility issues", attrs: { scope: "col" } }),
     ]),
   ]);
   table.appendChild(thead);
   const tbody = el("tbody");
+  const gradingLabels = { ok: "sum to 100%", mismatch: "does NOT sum to 100%", not_found: "n/a" };
   for (const c of courses) {
     const accCount = c.error ? 0 : c.accessibilityFindings.reduce((s, f) => s + f.count, 0);
     tbody.appendChild(
       el("tr", {}, [
         el("td", { text: c.label }),
         el("td", { text: c.error ? "n/a" : String(c.missingRequired.length) }),
-        el("td", { text: c.error ? "n/a" : String(accCount) }),
+        el("td", { text: c.error ? "n/a" : gradingLabels[c.gradingCheck.status] }),
+        el("td", { text: c.error ? "n/a" : c.isDocx ? "n/a" : String(accCount) }),
       ])
     );
   }
@@ -470,7 +572,9 @@ function renderResults(courses) {
     block.appendChild(
       el("p", {
         className: "page-info",
-        text: `Cover form: page(s) 1–${c.startPage}; syllabus content: page(s) ${c.startPage + 1}–${c.totalPages}.`,
+        text: c.isDocx
+          ? "Format: .docx (no page structure)."
+          : `Cover form: page(s) 1–${c.startPage}; syllabus content: page(s) ${c.startPage + 1}–${c.totalPages}.`,
       })
     );
     block.appendChild(el("p", { className: "page-info", text: c.levelsReason }));
@@ -488,8 +592,15 @@ function renderResults(courses) {
       block.appendChild(el("p", { text: "No required elements missing." }));
     }
 
+    if (c.gradingCheck.status !== "not_found") {
+      block.appendChild(el("h3", { text: "Grading Weight Check" }));
+      block.appendChild(el("p", { text: c.gradingCheck.message }));
+    }
+
     block.appendChild(el("h3", { text: "PDF Accessibility (ADA / PDF-UA) Issues — degraded check" }));
-    if (c.accessibilityFindings.length) {
+    if (c.accessibilityNote) {
+      block.appendChild(el("p", { text: c.accessibilityNote }));
+    } else if (c.accessibilityFindings.length) {
       const ul = el("ul", { className: "finding-list" });
       for (const f of c.accessibilityFindings) {
         ul.appendChild(
@@ -534,8 +645,9 @@ async function buildDocx(courses) {
   );
 
   children.push(new Paragraph({ text: "Summary", heading: HeadingLevel.HEADING_1 }));
+  const gradingLabels = { ok: "sum to 100%", mismatch: "does NOT sum to 100%", not_found: "n/a" };
   const headerRow = new TableRow({
-    children: ["Course", "Missing required elements", "Accessibility issues"].map(
+    children: ["Course", "Missing required elements", "Grading weights", "Accessibility issues"].map(
       (t) => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: t, bold: true })] })] })
     ),
   });
@@ -545,7 +657,8 @@ async function buildDocx(courses) {
       children: [
         c.label,
         c.error ? "n/a" : String(c.missingRequired.length),
-        c.error ? "n/a" : String(accCount),
+        c.error ? "n/a" : gradingLabels[c.gradingCheck.status],
+        c.error ? "n/a" : c.isDocx ? "n/a" : String(accCount),
       ].map((t) => new TableCell({ children: [new Paragraph(t)] })),
     });
   });
@@ -562,7 +675,9 @@ async function buildDocx(courses) {
         children: [
           new TextRun({
             italics: true,
-            text: `Cover form: page(s) 1–${c.startPage}; syllabus content: page(s) ${c.startPage + 1}–${c.totalPages}.`,
+            text: c.isDocx
+              ? "Format: .docx (no page structure)."
+              : `Cover form: page(s) 1–${c.startPage}; syllabus content: page(s) ${c.startPage + 1}–${c.totalPages}.`,
           }),
         ],
       })
@@ -583,8 +698,15 @@ async function buildDocx(courses) {
       children.push(new Paragraph("No required elements missing."));
     }
 
+    if (c.gradingCheck.status !== "not_found") {
+      children.push(new Paragraph({ text: "Grading Weight Check", heading: HeadingLevel.HEADING_2 }));
+      children.push(new Paragraph(c.gradingCheck.message));
+    }
+
     children.push(new Paragraph({ text: "PDF Accessibility (ADA / PDF-UA) Issues — degraded check", heading: HeadingLevel.HEADING_2 }));
-    if (c.accessibilityFindings.length) {
+    if (c.accessibilityNote) {
+      children.push(new Paragraph(c.accessibilityNote));
+    } else if (c.accessibilityFindings.length) {
       for (const f of c.accessibilityFindings) {
         children.push(
           new Paragraph({
@@ -625,12 +747,50 @@ async function downloadDocx(courses) {
   }
 }
 
+// ---- Per-file-type extraction ----
+async function processPdf(file) {
+  const buf = await file.arrayBuffer();
+  // pdf.js takes ownership of (detaches) the ArrayBuffer passed to
+  // getDocument -- pass it a copy so `buf` stays readable afterward for
+  // accessibilityCheck's own raw-byte language scan.
+  const { pdf, pages } = await loadPdfPages(buf.slice(0));
+  const startPage = findSyllabusStartPage(pages);
+  const syllabusText = pages.slice(startPage).join("\n");
+  return {
+    syllabusText,
+    startPage,
+    totalPages: pdf.numPages,
+    firstPageForLevel: pages[startPage] || "",
+    pdf,
+    buf,
+  };
+}
+
+async function processDocx(file) {
+  const buf = await file.arrayBuffer();
+  const result = await mammoth.extractRawText({ arrayBuffer: buf });
+  const fullText = result.value;
+  // A .docx has no page structure to split on the way a PDF does; cover-form
+  // detection still runs (harmless if this isn't a Grad School approval
+  // packet -- findSyllabusStartPage only skips pages that open with the
+  // form's own title, so an ordinary syllabus is left untouched at index 0).
+  const pages = [fullText];
+  const startPage = findSyllabusStartPage(pages);
+  const syllabusText = pages.slice(startPage).join("\n");
+  return {
+    syllabusText,
+    startPage,
+    totalPages: 1,
+    firstPageForLevel: syllabusText.slice(0, 2000),
+  };
+}
+
 // ---- Orchestration ----
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
   const files = Array.from(fileInput.files || []);
   if (!files.length) {
-    setStatus("Choose at least one PDF first.", true);
+    setStatus("Choose at least one PDF or .docx file first.", true);
     return;
   }
   const autoMode = document.getElementById("level-mode-auto").checked;
@@ -654,31 +814,39 @@ form.addEventListener("submit", async (e) => {
     for (const file of files) {
       setStatus(`Processing ${file.name}…`);
       try {
-        const buf = await file.arrayBuffer();
-        // pdf.js takes ownership of (detaches) the ArrayBuffer passed to
-        // getDocument -- pass it a copy so `buf` stays readable afterward
-        // for accessibilityCheck's own raw-byte language scan.
-        const { pdf, pages } = await loadPdfPages(buf.slice(0));
-        const startPage = findSyllabusStartPage(pages);
-        const syllabusText = pages.slice(startPage).join("\n");
+        const isDocx = /\.docx$/i.test(file.name);
+        const extracted = isDocx ? await processDocx(file) : await processPdf(file);
 
         let levels, levelsReason;
         if (autoMode) {
-          ({ levels, reason: levelsReason } = detectCourseLevels(pages[startPage] || ""));
+          ({ levels, reason: levelsReason } = detectCourseLevels(extracted.firstPageForLevel));
         } else {
           levels = manualLevels;
           levelsReason = "Manually set to: " + manualLevels.join(", ") + ".";
         }
 
-        const missingRequired = checkSyllabus(syllabusText, levels, elements);
-        const accessibilityFindings = await accessibilityCheck(pdf, buf, startPage);
+        const missingRequired = checkSyllabus(extracted.syllabusText, levels, elements);
+        const gradingCheck = checkGradingWeights(extracted.syllabusText);
+
+        let accessibilityFindings = [];
+        let accessibilityNote = null;
+        if (isDocx) {
+          accessibilityNote =
+            "Not available for .docx files — PDF/UA is a PDF-specific accessibility standard. Export to PDF to run this check.";
+        } else {
+          accessibilityFindings = await accessibilityCheck(extracted.pdf, extracted.buf, extracted.startPage);
+        }
+
         courses.push({
           label: courseLabel(file.name),
-          startPage,
-          totalPages: pdf.numPages,
+          isDocx,
+          startPage: extracted.startPage,
+          totalPages: extracted.totalPages,
           levelsReason,
           missingRequired,
+          gradingCheck,
           accessibilityFindings,
+          accessibilityNote,
         });
       } catch (err) {
         console.error(err);

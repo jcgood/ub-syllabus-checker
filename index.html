@@ -103,8 +103,18 @@
 
       <fieldset>
         <legend>Which UB policy level(s) apply?</legend>
-        <label><input type="checkbox" id="level-undergraduate"> Undergraduate</label>
-        <label><input type="checkbox" id="level-graduate" checked> Graduate</label>
+        <label style="display:block; margin-bottom:0.4rem;">
+          <input type="radio" name="level-mode" id="level-mode-auto" value="auto" checked>
+          Detect automatically from the course number (recommended) — e.g. BIO 351 → undergraduate, EVS 518 → graduate, EVS 418/518 → both
+        </label>
+        <label style="display:block;">
+          <input type="radio" name="level-mode" id="level-mode-manual" value="manual">
+          Choose manually for all files
+        </label>
+        <div id="manual-levels" style="margin: 0.5rem 0 0 1.6rem;" hidden>
+          <label><input type="checkbox" id="level-undergraduate"> Undergraduate</label>
+          <label><input type="checkbox" id="level-graduate" checked> Graduate</label>
+        </div>
       </fieldset>
 
       <button type="submit" id="check-btn">Check syllabus(es)</button>
@@ -128,6 +138,12 @@
         Graduate Course Approval Request Form" cover form if one precedes
         the syllabus in the PDF.
       </p>
+      <p><strong>Which policy level applies (undergraduate/graduate) is auto-detected</strong>
+      from the course number stated on the syllabus's first page, per UB's own numbering
+      convention (100–499 undergraduate, 500+ graduate) — a dual-listed course
+      (e.g. "EVS 418/518") is checked against both. If no recognizable course number
+      is found, both levels are checked rather than guessing one. Switch to "Choose
+      manually" if this gets it wrong for an unusually formatted syllabus.</p>
       <p><strong>This is a heuristic gap-flagger, not an authoritative compliance determination.</strong>
       A "detected" element may be a false match; a "missing" one may just be phrased unexpectedly.
       Always read the flagged section of the real document before acting on a finding.</p>
@@ -169,6 +185,13 @@ const form = document.getElementById("check-form");
 const checkBtn = document.getElementById("check-btn");
 const statusEl = document.getElementById("status");
 const resultsSection = document.getElementById("results-section");
+const manualLevelsDiv = document.getElementById("manual-levels");
+
+for (const radio of document.querySelectorAll('input[name="level-mode"]')) {
+  radio.addEventListener("change", () => {
+    manualLevelsDiv.hidden = document.getElementById("level-mode-manual").checked === false;
+  });
+}
 
 let standardsCache = null;
 let lastCourses = null;
@@ -234,6 +257,43 @@ async function loadPdfPages(arrayBuffer) {
     pages.push(content.items.map((it) => it.str).join(" ").replace(/\s+/g, " "));
   }
   return { pdf, pages };
+}
+
+// ---- Course-level auto-detection, ported from level_detection.py ----
+// UB numbering convention: 100-499 undergraduate, 500+ graduate. Scoped
+// to the first syllabus page only -- see level_detection.py's docstring
+// for why (avoids picking up an unrelated course number mentioned deep
+// in a prerequisites section or reading list).
+const COURSE_NUMBER_RE = /\b([A-Z]{2,5})\s?(\d{3})(?:\s*\/\s*(\d{3}))?\b/g;
+
+function detectCourseLevels(firstPageText) {
+  const re = new RegExp(COURSE_NUMBER_RE.source, "g");
+  const codes = [];
+  const numbers = [];
+  let m;
+  while ((m = re.exec(firstPageText)) !== null) {
+    codes.push(m[0].trim());
+    numbers.push(parseInt(m[2], 10));
+    if (m[3]) numbers.push(parseInt(m[3], 10));
+  }
+  const hasUG = numbers.some((n) => n >= 100 && n <= 499);
+  const hasGrad = numbers.some((n) => n >= 500);
+  if (hasUG && hasGrad) {
+    return {
+      levels: ["undergraduate", "graduate"],
+      reason: `Dual-listed course number(s) detected (${codes.join(", ")}) — checking both levels.`,
+    };
+  }
+  if (hasUG) {
+    return { levels: ["undergraduate"], reason: `Undergraduate course number detected (${codes.join(", ")}).` };
+  }
+  if (hasGrad) {
+    return { levels: ["graduate"], reason: `Graduate course number detected (${codes.join(", ")}).` };
+  }
+  return {
+    levels: ["undergraduate", "graduate"],
+    reason: "No course number detected — checked against both levels.",
+  };
 }
 
 // ---- Required-element check, ported from check_syllabus.py / syllabus_standards.py ----
@@ -413,6 +473,7 @@ function renderResults(courses) {
         text: `Cover form: page(s) 1–${c.startPage}; syllabus content: page(s) ${c.startPage + 1}–${c.totalPages}.`,
       })
     );
+    block.appendChild(el("p", { className: "page-info", text: c.levelsReason }));
 
     block.appendChild(el("h3", { text: "Missing / Incomplete Syllabus Elements" }));
     if (c.missingRequired.length) {
@@ -506,6 +567,7 @@ async function buildDocx(courses) {
         ],
       })
     );
+    children.push(new Paragraph({ children: [new TextRun({ italics: true, text: c.levelsReason })] }));
 
     children.push(new Paragraph({ text: "Missing / Incomplete Syllabus Elements", heading: HeadingLevel.HEADING_2 }));
     if (c.missingRequired.length) {
@@ -571,12 +633,15 @@ form.addEventListener("submit", async (e) => {
     setStatus("Choose at least one PDF first.", true);
     return;
   }
-  const levels = [];
-  if (document.getElementById("level-undergraduate").checked) levels.push("undergraduate");
-  if (document.getElementById("level-graduate").checked) levels.push("graduate");
-  if (!levels.length) {
-    setStatus("Choose at least one policy level.", true);
-    return;
+  const autoMode = document.getElementById("level-mode-auto").checked;
+  let manualLevels = [];
+  if (!autoMode) {
+    if (document.getElementById("level-undergraduate").checked) manualLevels.push("undergraduate");
+    if (document.getElementById("level-graduate").checked) manualLevels.push("graduate");
+    if (!manualLevels.length) {
+      setStatus("Choose at least one policy level.", true);
+      return;
+    }
   }
 
   checkBtn.disabled = true;
@@ -596,12 +661,22 @@ form.addEventListener("submit", async (e) => {
         const { pdf, pages } = await loadPdfPages(buf.slice(0));
         const startPage = findSyllabusStartPage(pages);
         const syllabusText = pages.slice(startPage).join("\n");
+
+        let levels, levelsReason;
+        if (autoMode) {
+          ({ levels, reason: levelsReason } = detectCourseLevels(pages[startPage] || ""));
+        } else {
+          levels = manualLevels;
+          levelsReason = "Manually set to: " + manualLevels.join(", ") + ".";
+        }
+
         const missingRequired = checkSyllabus(syllabusText, levels, elements);
         const accessibilityFindings = await accessibilityCheck(pdf, buf, startPage);
         courses.push({
           label: courseLabel(file.name),
           startPage,
           totalPages: pdf.numPages,
+          levelsReason,
           missingRequired,
           accessibilityFindings,
         });

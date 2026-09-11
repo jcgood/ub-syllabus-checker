@@ -175,8 +175,8 @@
       },
       "description": "A reference to the correct Incomplete ('I' grade) Policy for students who cannot complete coursework by the end of the term. CONFLICT: undergraduate and graduate students are governed by two DIFFERENT Incomplete Policies at two different URLs; see `note`. Split out from Grading Policy (2026-09) since a syllabus can satisfy one without the other, and a single combined pass/fail flag couldn't say which.",
       "detect": [
-        "incomplete[\\s-]polic",
-        "incomplete\\s+grade"
+        "incomplete.{0,20}(?:polic|grade)",
+        "(?:polic|grade).{0,20}incomplete"
       ],
       "texts": {
         "undergraduate": [
@@ -205,7 +205,7 @@
       "detect": [
         "course schedule",
         "week\\s*1\\b[\\s\\S]*week\\s*1[0-5]\\b",
-        "\\b\\d{1,2}/\\d{1,2}\\s*:"
+        "\\b\\d{1,2}/\\d{1,2}\\b[\\s\\S]*\\d{1,2}/\\d{1,2}\\b"
       ],
       "texts": {},
       "note": "Required on undergrad page, only optional on grad page -- not a real conflict, just an asymmetric floor."

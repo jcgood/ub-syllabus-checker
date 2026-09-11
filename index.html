@@ -421,7 +421,12 @@ function checkSyllabus(text, levels, elements) {
 // ranges, even pasted-in email MIME source in one real sample -- and
 // silently produces a confidently wrong total).
 const GRADING_SECTION_START_RE = /(?:^|\n)[ \t]*(?:Grading(?:\s+Policy)?|Grade\s+Breakdown|Grading\s+Scale)\s*:?[ \t]*/i;
-const GRADING_SECTION_STOP_RE = /(?:^|\n)[ \t]*(?:Course\s+Schedule|Weekly\s+Schedule|Course\s+Policies|UB\s+and\s+Classroom\s+Policies|Important\s+Dates|Week\s*1\b|Module\s*1\b)/i;
+// A line-starting "Total" immediately followed (after any whitespace)
+// by a digit closes a weight/points table -- see grading_check.py's
+// SECTION_STOP_RE comment for the full CHE 412 / BIO 351 rationale
+// (the digit requirement rejects a "Total" COLUMN HEADER and "(N
+// total)" parentheticals, neither of which precede a number).
+const GRADING_SECTION_STOP_RE = /(?:^|\n)[ \t]*(?:Course\s+Schedule|Weekly\s+Schedule|Course\s+Policies|UB\s+and\s+Classroom\s+Policies|Important\s+Dates|Week\s*1\b|Module\s*1\b|Total\b(?=\s*\d))/i;
 // Sanity ceiling only, not a routine truncation -- see grading_check.py's
 // MAX_SECTION_CHARS comment: a real syllabus's Grading Policy section can
 // run well past a few thousand characters (per-category letter-grade

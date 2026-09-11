@@ -183,6 +183,11 @@
       not one — the two are governed by different, sometimes conflicting UB
       policies per level, and lumping them into a single pass/fail flag made
       it unclear which part of a syllabus was actually missing.</p>
+      <p><strong>Course Code Format is informational only, never a compliance flag:</strong>
+      if the syllabus doesn't state the precise official subject code + instruction-type
+      abbreviation (e.g. "HIS 484 SEM") — only a spelled-out equivalent like "HISTORY 484,
+      SEMINAR" — this notes it as a heads-up to verify against the catalog listing, without
+      counting it as a missing required element.</p>
       <p><strong>Which policy level applies (undergraduate/graduate) is auto-detected</strong>
       from the course number stated on the syllabus's first page, per UB's own numbering
       convention (100–499 undergraduate, 500+ graduate) — a dual-listed course
@@ -356,6 +361,22 @@ function detectCourseLevels(firstPageText, filename) {
     levels: ["undergraduate", "graduate"],
     reason: "No course number detected — checked against both levels.",
   };
+}
+
+// ---- Precise course-code format check, ported from course_code_check.py ----
+// Informational only -- never affects whether anything counts as
+// "missing." A spelled-out subject/type ("HISTORY 484, SEMINAR")
+// instead of the precise official code ("HIS 484 SEM") is a stylistic
+// variation, not a compliance gap, per Jeff's own call (2026-09).
+const INSTRUCTION_TYPES = ["LEC", "SEM", "TUT", "LAB", "LLB", "LR", "REC", "DIS", "STU"];
+const PRECISE_CODE_RE = new RegExp(
+  "\\b[A-Z]{2,5}\\s?\\d{3}(?:\\s*/\\s*\\d{3})?\\s*[|/,:-]?\\s*(?:" + INSTRUCTION_TYPES.join("|") + ")\\b"
+);
+const COURSE_CODE_NOTE =
+  'Does not state the precise official subject code + instruction-type abbreviation together (e.g. "HIS 484 SEM") — it may only give a spelled-out equivalent. Informational only, not a compliance gap: verify this matches the department\'s official HUB catalog listing.';
+
+function checkPreciseCourseCode(firstPageText) {
+  return PRECISE_CODE_RE.test(firstPageText) ? null : COURSE_CODE_NOTE;
 }
 
 // ---- Required-element check, ported from check_syllabus.py / syllabus_standards.py ----
@@ -658,6 +679,11 @@ function renderResults(courses) {
       block.appendChild(el("p", { text: c.gradingCheck.message }));
     }
 
+    if (c.codeNote) {
+      block.appendChild(el("h3", { text: "Course Code Format (informational)" }));
+      block.appendChild(el("p", { text: c.codeNote }));
+    }
+
     block.appendChild(el("h3", { text: "PDF Accessibility (ADA / PDF-UA) Issues — degraded check" }));
     if (c.accessibilityNote) {
       block.appendChild(el("p", { text: c.accessibilityNote }));
@@ -762,6 +788,11 @@ async function buildDocx(courses) {
     if (c.gradingCheck.status !== "not_found") {
       children.push(new Paragraph({ text: "Grading Weight Check", heading: HeadingLevel.HEADING_2 }));
       children.push(new Paragraph(c.gradingCheck.message));
+    }
+
+    if (c.codeNote) {
+      children.push(new Paragraph({ text: "Course Code Format (informational)", heading: HeadingLevel.HEADING_2 }));
+      children.push(new Paragraph(c.codeNote));
     }
 
     children.push(new Paragraph({ text: "PDF Accessibility (ADA / PDF-UA) Issues — degraded check", heading: HeadingLevel.HEADING_2 }));
@@ -888,6 +919,7 @@ form.addEventListener("submit", async (e) => {
 
         const missingRequired = checkSyllabus(extracted.syllabusText, levels, elements);
         const gradingCheck = checkGradingWeights(extracted.syllabusText);
+        const codeNote = checkPreciseCourseCode(extracted.firstPageForLevel);
 
         let accessibilityFindings = [];
         let accessibilityNote = null;
@@ -906,6 +938,7 @@ form.addEventListener("submit", async (e) => {
           levelsReason,
           missingRequired,
           gradingCheck,
+          codeNote,
           accessibilityFindings,
           accessibilityNote,
         });

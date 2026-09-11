@@ -365,7 +365,12 @@ function checkSyllabus(text, levels, elements) {
 // silently produces a confidently wrong total).
 const GRADING_SECTION_START_RE = /(?:^|\n)[ \t]*(?:Grading(?:\s+Policy)?|Grade\s+Breakdown|Grading\s+Scale)\s*:?[ \t]*/i;
 const GRADING_SECTION_STOP_RE = /(?:^|\n)[ \t]*(?:Course\s+Schedule|Weekly\s+Schedule|Course\s+Policies|UB\s+and\s+Classroom\s+Policies|Important\s+Dates|Week\s*1\b|Module\s*1\b)/i;
-const GRADING_MAX_SECTION_CHARS = 3000;
+// Sanity ceiling only, not a routine truncation -- see grading_check.py's
+// MAX_SECTION_CHARS comment: a real syllabus's Grading Policy section can
+// run well past a few thousand characters (per-category letter-grade
+// rubrics inline under each weight), and truncating anyway silently drops
+// later, real weight components from the sum.
+const GRADING_MAX_SECTION_CHARS = 20000;
 const RANGE_PCT_RE = /\d[\d.]*\s*[-–—]\s*\d[\d.]*\s*%/g;
 const PCT_RE = /(\d{1,3}(?:\.\d+)?)\s?%/g;
 const GRADING_TOLERANCE = 2.0;
@@ -404,13 +409,17 @@ function checkGradingWeights(text) {
   const pctRe = new RegExp(PCT_RE.source, "g");
   while ((pm = pctRe.exec(section)) !== null) {
     if (inExcludedSpan(pm.index)) continue;
+    const before = section.slice(Math.max(0, pm.index - 20), pm.index);
     const after = section.slice(pm.index + pm[0].length, pm.index + pm[0].length + 10);
     if (/^\s*[A-F][+-]?\b(?!\w)/.test(after)) continue;
-    // "50% of your grade -- 12.5% EACH" -- the 12.5% is a per-item
-    // breakdown of the 50% already counted, not a separate additive
-    // component (seen for real: 50 + 12.5 + 25 + 25 = 112.5% instead
-    // of the real 50+25+25=100%).
-    if (/^\s*each\b/i.test(after)) continue;
+    // A per-item breakdown of a component already counted, not a
+    // separate additive component -- "each" can land on either side of
+    // the percentage depending on phrasing ("12.5% each" vs. "each 4%").
+    if (/^\s*each\b/i.test(after) || /each\s*$/i.test(before)) continue;
+    // "...will count for half of one percentage point out of the
+    // TOTAL 15%" -- a restatement of a weight already counted under
+    // its own heading a sentence earlier, not a second component.
+    if (/total\s*$/i.test(before)) continue;
     percentages.push(parseFloat(pm[1]));
   }
 

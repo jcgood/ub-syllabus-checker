@@ -179,6 +179,14 @@
       to 100% here also counts as positive evidence for the separate "Grading
       Policy" required-element check below, even when no specific phrase like
       "course evaluation" or "grade breakdown" is present.</p>
+      <p><strong>Graduate syllabi are also checked line by line</strong> against the
+      Graduate School page's own list under each section (class number, delivery mode,
+      outcomes linked to the program, course-evaluation reminder, a specific generative-AI
+      statement, and so on). Lines the page marks "where applicable", or only says a section
+      "may include", are listed under "Worth a Look" rather than counted as missing. The
+      Academic Integrity and Accessibility Resources statements, which the Graduate School
+      says must be included word for word, are compared with the official text and reported
+      as matching, close (an older or edited version), or not found.</p>
       <p><strong>"Grading Policy" and "Incomplete Policy" are two separate checks</strong>,
       not one — the two are governed by different, sometimes conflicting UB
       policies per level, and lumping them into a single pass/fail flag made
@@ -298,22 +306,40 @@ function findSyllabusStartPage(pages) {
 }
 
 // ---- PDF text extraction via pdf.js ----
+// pdf.js returns many small text items, and a PDF often splits a single
+// word across items. Joining items with a space (the original approach)
+// put spaces inside words -- "EVS442 /54 2 , Spring 202 7" for a real
+// sample's "EVS442/542, Spring 2027" -- which made a dual-listed course
+// detect as undergraduate-only and broke semester and statement matching
+// (found 2026-10-01). Instead, use each item's position: a new line when
+// the baseline moves or pdf.js marks an end of line, a space only where
+// there is a visible horizontal gap. This reproduces pdftotext's output
+// closely, so the Python-written detect patterns behave the same here.
+function pageItemsToText(items) {
+  let text = "";
+  let prev = null;
+  for (const it of items) {
+    if (prev && !prev.hasEOL && it.str) {
+      const sameLine = Math.abs(it.transform[5] - prev.transform[5]) < 2;
+      const gap = it.transform[4] - (prev.transform[4] + prev.width);
+      const fontSize = Math.hypot(it.transform[2], it.transform[3]) || 10;
+      if (!sameLine) text += "\n";
+      else if (gap > fontSize * 0.15 && !/\s$/.test(text) && !/^\s/.test(it.str)) text += " ";
+    }
+    text += it.str;
+    if (it.hasEOL) text += "\n";
+    prev = it;
+  }
+  return text.replace(/[ \t]+/g, " ");
+}
+
 async function loadPdfPages(arrayBuffer) {
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
   const pages = [];
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    // pdf.js returns many small, often per-run text items; joining them
-    // with a single space each still produces irregular runs of multiple
-    // spaces wherever the PDF itself breaks a word/phrase across items
-    // (e.g. "Course   Description" instead of "Course Description"),
-    // which silently breaks every literal-substring detect pattern in
-    // standards.json (ported as-is from syllabus_standards.py, written
-    // against pdftotext's normally-spaced output). Collapse to single
-    // spaces so those patterns match the same way they do in the
-    // Python/pdftotext-based tool.
-    pages.push(content.items.map((it) => it.str).join(" ").replace(/\s+/g, " "));
+    pages.push(pageItemsToText(content.items));
   }
   return { pdf, pages };
 }
@@ -406,12 +432,127 @@ function checkSyllabus(text, levels, elements) {
     if (!detected && element.id === "grading-policy" && gradingWeightsOk) {
       detected = true;
     }
+    // A section with item lists counts as present if any required item is
+    // found -- see detail_check.py's section_found_by_items().
     if (!detected) {
-      missing.push({ title: element.title, reason: firstSentence(element.description) });
+      detected = (element.items || []).some(
+        (item) =>
+          item.kind === "required" &&
+          levels.some((l) => item.levels.includes(l)) &&
+          itemFound(item, text, gradingWeightsOk)
+      );
+    }
+    if (!detected) {
+      missing.push({ id: element.id, title: element.title, reason: firstSentence(element.description) });
     }
   }
   return missing;
 }
+
+// ---- Item-level and official-statement checks, ported from detail_check.py ----
+// See that module's docstring. Graduate only for now: only graduate
+// elements carry items, and standards.statements only has graduate entries.
+const SHINGLE_WORDS = 5;
+const CLOSE_THRESHOLD = 0.5;
+
+function itemFound(item, text, gradingWeightsOk) {
+  if (
+    item.detect.some((p) => new RegExp(p, "i").test(text)) ||
+    item.detect_cs.some((p) => new RegExp(p).test(text))
+  ) {
+    return true;
+  }
+  return item.id === "grade-combination" && gradingWeightsOk;
+}
+
+function checkItems(text, levels, elements, gradingWeightsOk) {
+  const results = [];
+  for (const element of elements) {
+    if (applicableLevels(element, levels).length === 0) continue;
+    for (const item of element.items || []) {
+      if (!levels.some((l) => item.levels.includes(l))) continue;
+      const found = item.kind === "manual" ? null : itemFound(item, text, gradingWeightsOk);
+      results.push({
+        elementId: element.id,
+        elementTitle: element.title,
+        itemId: item.id,
+        label: item.label,
+        kind: item.kind,
+        note: item.note,
+        found,
+      });
+    }
+  }
+  return results;
+}
+
+function normalizeForComparison(text) {
+  return text
+    .toLowerCase()
+    .replace(/[‘’“”]/g, "'")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function shingles(words, n = SHINGLE_WORDS) {
+  const out = new Set();
+  for (let i = 0; i + n <= words.length; i++) out.add(words.slice(i, i + n).join(" "));
+  return out;
+}
+
+function compareStatement(official, text) {
+  const normOfficial = normalizeForComparison(official);
+  const normText = normalizeForComparison(text);
+  if (normText.includes(normOfficial)) return { status: "verbatim", coverage: 1.0 };
+  const officialShingles = shingles(normOfficial.split(" "));
+  if (officialShingles.size === 0) return { status: "not_found", coverage: 0.0 };
+  const textShingles = shingles(normText.split(" "));
+  let hits = 0;
+  for (const s of officialShingles) if (textShingles.has(s)) hits++;
+  const coverage = hits / officialShingles.size;
+  return { status: coverage >= CLOSE_THRESHOLD ? "close" : "not_found", coverage };
+}
+
+function compareStatements(text, levels, statements) {
+  return (statements || [])
+    .filter((s) => levels.includes(s.level))
+    .map((s) => ({ elementId: s.element_id, title: s.title, level: s.level, ...compareStatement(s.text, text) }));
+}
+
+const STATEMENT_MESSAGES = {
+  close: (pct) =>
+    `wording differs from the required Graduate School text (${pct}% of it matches) - likely an older or edited version; replace it with the current text.`,
+  not_found: (pct) =>
+    `the required Graduate School text was not found (${pct}% of it matches) - the section may be there, but not with the mandated wording.`,
+};
+
+function detailFindings(itemResults, statementResults, missingElementIds) {
+  const out = { missingItems: [], statementIssues: [], worthALook: [], manual: [] };
+  for (const r of itemResults) {
+    if (missingElementIds.has(r.elementId)) continue;
+    const title = `${r.elementTitle} - ${r.label}`;
+    if (r.kind === "manual") {
+      out.manual.push({ title, reason: r.note || "Check by hand." });
+    } else if (r.found) {
+      continue;
+    } else if (r.kind === "required") {
+      out.missingItems.push({ title, reason: r.note || "Not found in the syllabus text." });
+    } else {
+      const qualifier = r.kind === "if_applicable" ? "only needed if it applies" : "suggested by the Graduate School page";
+      out.worthALook.push({ title, reason: `Not found (${qualifier}).` });
+    }
+  }
+  for (const s of statementResults) {
+    if (missingElementIds.has(s.elementId) || s.status === "verbatim") continue;
+    out.statementIssues.push({ title: s.title, reason: STATEMENT_MESSAGES[s.status](Math.round(s.coverage * 100)) });
+  }
+  return out;
+}
+
+const NOT_CHECKED_NOTE =
+  "Not checked automatically (confirm by hand): the course title; whether the course description matches the " +
+  "official Catalog description; any added instructor/program/department academic-integrity rules; that the " +
+  "syllabus is distributed in the first week of classes; and any department- or program-specific syllabus requirements.";
 
 // ---- Grading-weight-sums-to-100% check, ported from grading_check.py ----
 // See that module's docstring for why this is scoped to a located
@@ -620,11 +761,12 @@ function renderResults(courses) {
   resultsSection.hidden = false;
 
   resultsSection.appendChild(el("h2", { text: "Summary" }));
+  resultsSection.appendChild(el("p", { className: "page-info", text: NOT_CHECKED_NOTE }));
   const table = el("table", { className: "summary-table" });
   const thead = el("thead", {}, [
     el("tr", {}, [
       el("th", { text: "Course", attrs: { scope: "col" } }),
-      el("th", { text: "Missing required elements", attrs: { scope: "col" } }),
+      el("th", { text: "Missing required items", attrs: { scope: "col" } }),
       el("th", { text: "Grading weights", attrs: { scope: "col" } }),
       el("th", { text: "Accessibility issues", attrs: { scope: "col" } }),
     ]),
@@ -677,6 +819,17 @@ function renderResults(courses) {
       block.appendChild(ul);
     } else {
       block.appendChild(el("p", { text: "No required elements missing." }));
+    }
+
+    if (c.worthALook.length) {
+      block.appendChild(el("h3", { text: "Worth a Look (only if applicable, or suggested)" }));
+      const ul = el("ul", { className: "finding-list" });
+      for (const item of c.worthALook) {
+        ul.appendChild(
+          el("li", {}, [el("strong", { text: item.title + ": " }), document.createTextNode(item.reason)])
+        );
+      }
+      block.appendChild(ul);
     }
 
     if (c.gradingCheck.status !== "not_found") {
@@ -735,11 +888,12 @@ async function buildDocx(courses) {
         "(no full PDF/UA-1 validation) — confirm findings against the actual document before acting on them.",
     })
   );
+  children.push(new Paragraph({ text: NOT_CHECKED_NOTE }));
 
   children.push(new Paragraph({ text: "Summary", heading: HeadingLevel.HEADING_1 }));
   const gradingLabels = { ok: "sum to 100%", mismatch: "does NOT sum to 100%", not_found: "n/a" };
   const headerRow = new TableRow({
-    children: ["Course", "Missing required elements", "Grading weights", "Accessibility issues"].map(
+    children: ["Course", "Missing required items", "Grading weights", "Accessibility issues"].map(
       (t) => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: t, bold: true })] })] })
     ),
   });
@@ -788,6 +942,18 @@ async function buildDocx(courses) {
       }
     } else {
       children.push(new Paragraph("No required elements missing."));
+    }
+
+    if (c.worthALook.length) {
+      children.push(new Paragraph({ text: "Worth a Look (only if applicable, or suggested)", heading: HeadingLevel.HEADING_2 }));
+      for (const item of c.worthALook) {
+        children.push(
+          new Paragraph({
+            bullet: { level: 0 },
+            children: [new TextRun({ text: item.title + ": ", bold: true }), new TextRun(item.reason)],
+          })
+        );
+      }
     }
 
     if (c.gradingCheck.status !== "not_found") {
@@ -905,7 +1071,7 @@ form.addEventListener("submit", async (e) => {
   resultsSection.hidden = true;
   try {
     setStatus("Loading policy standards…");
-    const { elements } = await loadStandards();
+    const { elements, statements } = await loadStandards();
 
     const courses = [];
     for (const file of files) {
@@ -922,8 +1088,15 @@ form.addEventListener("submit", async (e) => {
           levelsReason = "Manually set to: " + manualLevels.join(", ") + ".";
         }
 
-        const missingRequired = checkSyllabus(extracted.syllabusText, levels, elements);
+        const missingElements = checkSyllabus(extracted.syllabusText, levels, elements);
         const gradingCheck = checkGradingWeights(extracted.syllabusText);
+        const details = detailFindings(
+          checkItems(extracted.syllabusText, levels, elements, gradingCheck.status === "ok"),
+          compareStatements(extracted.syllabusText, levels, statements),
+          new Set(missingElements.map((m) => m.id))
+        );
+        const missingRequired = [...missingElements, ...details.missingItems, ...details.statementIssues];
+        const worthALook = details.worthALook;
         const codeNote = checkPreciseCourseCode(extracted.firstPageForLevel);
 
         let accessibilityFindings = [];
@@ -942,6 +1115,7 @@ form.addEventListener("submit", async (e) => {
           totalPages: extracted.totalPages,
           levelsReason,
           missingRequired,
+          worthALook,
           gradingCheck,
           codeNote,
           accessibilityFindings,

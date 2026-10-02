@@ -31,7 +31,8 @@
           "kind": "required",
           "detect": [],
           "detect_cs": [
-            "\\b[A-Z]{2,}\\s?\\d{3}"
+            "\\b[A-Z]{2,}\\s?\\d{3}",
+            "\\b[A-Z]{2,5}\\s?XXX\\b"
           ],
           "note": ""
         },
@@ -123,8 +124,8 @@
           "detect": [
             "\\b\\d{1,2}(?::\\d{2})?\\s*(?:am|pm|a\\.m\\.|p\\.m\\.)",
             "\\b\\d{1,2}:\\d{2}\\s*[-–]\\s*\\d{1,2}:\\d{2}",
-            "meeting times?",
-            "class meets"
+            "(?:class\\s+)?meeting\\s+(?:times?|days?)\\s*:",
+            "class\\s+meets"
           ],
           "detect_cs": [],
           "note": "A fully asynchronous online course may legitimately have no meeting times."
@@ -631,9 +632,9 @@
       },
       "description": "A guiding statement on students' use of generative AI tools, with specific permitted/prohibited uses or limits. The grad page lists this under Required Sections and says to avoid vague language; both pages offer a 'strictly forbidden' example and a 'limited use' example.",
       "detect": [
-        "generative\\s+(?:ai|artificial)",
+        "generative\\s+(?:a[il]\\b|artificial)",
         "chatgpt",
-        "\\bAI\\s+(?:tools?|use|policy)",
+        "\\bA[IL]\\s+(?:tools?|use|policy)",
         "artificial intelligence"
       ],
       "texts": {
@@ -656,9 +657,9 @@
           ],
           "kind": "required",
           "detect": [
-            "(?:generative|chatgpt|\\bAI\\b|artificial intelligence)[\\s\\S]{0,800}?(?:permitted|allowed|prohibited|forbidden|may (?:not )?(?:use|be used)|not to be used|encouraged|acceptable|unacceptable|must (?:not )?(?:use|disclose|cite|acknowledge))",
-            "(?:permitted|allowed|prohibited|forbidden|may (?:not )?use|acceptable)[\\s\\S]{0,200}?(?:generative|chatgpt|\\bAI\\b|artificial intelligence)",
-            "\\b(?:do not|don't|cannot|can't|may not|must not|should not|will not|not)\\s+use\\s+(?:[\\w-]+\\s+){0,4}(?:generative|chatgpt|AI\\b|artificial intelligence)",
+            "(?:generative|chatgpt|\\bAI\\b|\\bA[IL]\\s+tools?\\b|artificial intelligence)[\\s\\S]{0,800}?(?:permitted|allowed|prohibited|forbidden|may (?:not )?(?:use|be used)|not to be used|should not be used|encouraged|acceptable|unacceptable|must (?:not )?(?:use|disclose|cite|acknowledge))",
+            "(?:permitted|allowed|prohibited|forbidden|may (?:not )?use|acceptable)[\\s\\S]{0,200}?(?:generative|chatgpt|\\bAI\\b|\\bA[IL]\\s+tools?\\b|artificial intelligence)",
+            "\\b(?:do not|don't|cannot|can't|may not|must not|should not|will not|not)\\s+use\\s+(?:[\\w-]+\\s+){0,4}(?:generative|chatgpt|\\bAI\\b|\\bA[IL]\\s+tools?\\b|artificial intelligence)",
             "\\buse\\s+(?:of\\s+)?(?:generative\\s+)?(?:AI|chatgpt)\\b(?:\\s+[\\w-]+){0,3}?\\s+(?:to|for|when|on|in|during)\\b"
           ],
           "detect_cs": [],
@@ -882,13 +883,294 @@
       "element_id": "academic-integrity",
       "level": "graduate",
       "title": "Academic Integrity statement",
-      "text": "Academic integrity is a fundamental university value. Through the honest completion of academic work, students sustain the integrity of the university and of themselves while facilitating the university's imperative for the transmission of knowledge and culture based upon the generation of new and innovative ideas. For more information, please refer to the Graduate Academic Integrity policy."
+      "text": "Academic integrity is a fundamental university value. Through the honest completion of academic work, students sustain the integrity of the university and of themselves while facilitating the university's imperative for the transmission of knowledge and culture based upon the generation of new and innovative ideas. For more information, please refer to the Graduate Academic Integrity policy.",
+      "red_flags": [
+        {
+          "pattern": "\\bundergrad(?:uate)?\\b[\\s\\S]{0,60}?(?:catalog|integrity|polic)",
+          "message": "Points students to an undergraduate academic integrity policy; graduate students are governed by the Graduate Academic Integrity policy."
+        }
+      ]
     },
     {
       "element_id": "accessibility-resources",
       "level": "graduate",
       "title": "Accessibility Resources statement",
-      "text": "If you have any disability which requires reasonable accommodations to enable you to participate in this course, please contact the Office of Accessibility Resources in 60 Capen Hall, 716-645-2608 and also the instructor of this course during the first week of class. The office will provide you with information and review appropriate arrangements for reasonable accommodations."
+      "text": "If you have any disability which requires reasonable accommodations to enable you to participate in this course, please contact the Office of Accessibility Resources in 60 Capen Hall, 716-645-2608 and also the instructor of this course during the first week of class. The office will provide you with information and review appropriate arrangements for reasonable accommodations.",
+      "red_flags": []
     }
-  ]
+  ],
+  "headings": {
+    "basic-information": [],
+    "course-information": [
+      "course\\s+information",
+      "instructor(?:\\s+information)?",
+      "contact\\s+information",
+      "office\\s+hours",
+      "meeting\\s+times?",
+      "class\\s+meetings?"
+    ],
+    "course-description": [
+      "course\\s+description",
+      "\\bdescription\\b",
+      "course\\s+overview",
+      "\\boverview\\b",
+      "about\\s+(?:this|the)\\s+course",
+      "catalog\\s+description"
+    ],
+    "course-materials": [
+      "(?:course|required|reading)\\s+materials?",
+      "\\bmaterials\\b",
+      "\\btexts?\\b",
+      "\\btextbooks?\\b",
+      "\\breadings?\\b",
+      "(?:course|learning|required)\\s+resources"
+    ],
+    "learning-outcomes": [
+      "learning\\s+(?:outcomes|objectives|goals)",
+      "course\\s+(?:objectives|goals|outcomes?)",
+      "\\bobjectives\\b",
+      "\\boutcomes\\b",
+      "\\bSLOs?\\b"
+    ],
+    "course-requirements": [
+      "course\\s+requirements",
+      "(?:assignment|grading|graded)\\s+requirements",
+      "\\bassignments?\\b",
+      "\\bassessments?\\b",
+      "graded\\s+(?:work|components)"
+    ],
+    "classroom-environment": [
+      "classroom\\s+(?:environment|climate|community)",
+      "(?:inclusive|learning)\\s+(?:classroom|environment|community)",
+      "inclusive\\s+(?:teaching|excellence)",
+      "diversity,?\\s+(?:equity|and\\s+inclusion)",
+      "community\\s+(?:agreements|norms|guidelines)"
+    ],
+    "grading-policy": [
+      "\\bgrading\\b",
+      "grade\\s+(?:breakdown|scale|distribution)",
+      "^(?:final\\s+|course\\s+)?grades?\\b",
+      "^evaluation\\b"
+    ],
+    "incomplete-policy": [
+      "\\bincompletes?\\b"
+    ],
+    "academic-content": [
+      "(?:course|weekly|class)\\s+(?:schedule|calendar|outline|topics)",
+      "\\bschedule\\b",
+      "\\bcalendar\\b"
+    ],
+    "generative-ai-tools": [
+      "generative\\s+(?:a[il]\\b|artificial)",
+      "\\bAI\\b",
+      "\\bA[IL]\\s+tools?\\b",
+      "artificial\\s+intelligence",
+      "chatgpt"
+    ],
+    "academic-integrity": [
+      "academic\\s+(?:integrity|honesty|dishonesty)",
+      "\\bintegrity\\b",
+      "\\bplagiarism\\b"
+    ],
+    "accessibility-resources": [
+      "\\baccessibility\\b",
+      "\\bdisabilit(?:y|ies)\\b",
+      "\\baccommodations?\\b"
+    ],
+    "attendance-policy": [
+      "\\battendance\\b",
+      "\\babsences?\\b"
+    ],
+    "instructor-support-staff-info": [
+      "teaching\\s+assistants?",
+      "course\\s+(?:support\\s+)?staff"
+    ],
+    "protecting-course-materials": [
+      "(?:protecting|distribution\\s+of)\\s+course\\s+materials",
+      "course\\s+materials\\s+(?:policy|disclaimer)",
+      "intellectual\\s+property"
+    ],
+    "lab-safety": [
+      "lab(?:oratory)?\\s+safety"
+    ],
+    "classroom-decorum": [
+      "classroom\\s+(?:decorum|conduct|etiquette)",
+      "\\bdecorum\\b",
+      "\\betiquette\\b",
+      "electronic\\s+devices"
+    ],
+    "critical-campus-resources": [
+      "campus\\s+resources",
+      "support\\s+services",
+      "\\bcounseling\\b",
+      "\\bwellness\\b",
+      "title\\s+ix",
+      "sexual\\s+violence",
+      "student\\s+(?:support|resources)"
+    ],
+    "technology-recommendations": [
+      "\\btechnology\\b",
+      "technical\\s+requirements"
+    ]
+  },
+  "heading_exclude": {
+    "learning-outcomes": [
+      "\\bprogram\\b"
+    ]
+  },
+  "heading_examples": {
+    "course-information": [
+      "Course Information",
+      "Instructor"
+    ],
+    "course-description": [
+      "Course Description"
+    ],
+    "course-materials": [
+      "Course Materials",
+      "Required Texts"
+    ],
+    "learning-outcomes": [
+      "Student Learning Outcomes",
+      "Course Objectives"
+    ],
+    "course-requirements": [
+      "Course Requirements",
+      "Assignments"
+    ],
+    "classroom-environment": [
+      "Classroom Environment",
+      "Inclusive Learning Environment"
+    ],
+    "grading-policy": [
+      "Grading"
+    ],
+    "incomplete-policy": [
+      "Incomplete Policy"
+    ],
+    "academic-content": [
+      "Course Schedule"
+    ],
+    "generative-ai-tools": [
+      "Generative AI"
+    ],
+    "academic-integrity": [
+      "Academic Integrity"
+    ],
+    "accessibility-resources": [
+      "Accessibility Resources"
+    ]
+  },
+  "item_details": {
+    "subject-code-number": {
+      "looked_for": "a subject code and course number such as \"ANA 599\"",
+      "scope": "document"
+    },
+    "instruction-type": {
+      "looked_for": "an instruction-type code such as LEC, SEM or TUT",
+      "scope": "document"
+    },
+    "course-title": {
+      "looked_for": "",
+      "scope": "document"
+    },
+    "class-number": {
+      "looked_for": "\"Class Number\", \"Class #\" or \"Registration number\"",
+      "scope": "document",
+      "proposal": "not_applicable",
+      "proposal_note": "Not applicable to a new-course proposal: a class number is assigned when a section is scheduled, after the course is approved."
+    },
+    "semester": {
+      "looked_for": "a term and year such as \"Fall 2026\"",
+      "scope": "document",
+      "proposal": "check",
+      "proposal_note": "May not be set yet for a new-course proposal (a placeholder such as \"Spring 20XX\" is common); confirm by hand."
+    },
+    "meeting-times": {
+      "looked_for": "class times such as \"2:00-3:20 pm\" or \"class meets\"",
+      "scope": "document",
+      "proposal": "check",
+      "proposal_note": "Meeting times are often not set until the course is scheduled; confirm by hand."
+    },
+    "delivery-mode": {
+      "looked_for": "words such as \"in-person\", \"hybrid\", \"online course\" or \"asynchronous\"",
+      "scope": "document"
+    },
+    "credits": {
+      "looked_for": "a credit count such as \"3 credits\" or \"Credits: 3\"",
+      "scope": "document"
+    },
+    "instructor-contact": {
+      "looked_for": "an email address",
+      "scope": "document"
+    },
+    "office-hours": {
+      "looked_for": "\"office hours\", \"student hours\" or \"by appointment\"",
+      "scope": "document"
+    },
+    "other-persons": {
+      "looked_for": "\"TA\", \"teaching assistant\" or \"grader\"",
+      "scope": "document"
+    },
+    "official-description": {
+      "looked_for": "",
+      "scope": "section"
+    },
+    "prerequisites": {
+      "looked_for": "\"prerequisite\", \"corequisite\" or \"prior knowledge\"",
+      "scope": "section"
+    },
+    "materials-location": {
+      "looked_for": "\"Brightspace\", \"reserve\", \"library\" or \"available on/at\"",
+      "scope": "section"
+    },
+    "outcomes-student-focused": {
+      "looked_for": "\"students will be able to\", \"you will ...\" or \"by the end of the course\"",
+      "scope": "section"
+    },
+    "outcomes-program-link": {
+      "looked_for": "\"program learning outcomes\", \"program goals\", \"curriculum map\" or \"degree program\"",
+      "scope": "section"
+    },
+    "deadlines": {
+      "looked_for": "\"due\" or \"deadline\"",
+      "scope": "section"
+    },
+    "extension-policy": {
+      "looked_for": "\"extension\", \"late work\" or \"late submission\"",
+      "scope": "section"
+    },
+    "assignments-linked-outcomes": {
+      "looked_for": "wording such as \"assesses outcome 2\", \"SLO 1\", or assignment names in brackets after each outcome",
+      "scope": "section"
+    },
+    "grade-combination": {
+      "looked_for": "percentages, points or weights for the graded work",
+      "scope": "section"
+    },
+    "grade-standards": {
+      "looked_for": "a grading scale (\"A = 93-100\", \"90% and above\") or a description of each letter grade (\"A: ...\", \"B+: ...\")",
+      "scope": "section"
+    },
+    "course-evaluations": {
+      "looked_for": "\"course evaluations\" or \"evaluation process\"",
+      "scope": "document"
+    },
+    "grade-method": {
+      "looked_for": "\"letter grades\", \"A-F\", \"S/U\" or \"pass/fail\"",
+      "scope": "section"
+    },
+    "curve": {
+      "looked_for": "\"curve\" or \"curved\"",
+      "scope": "section"
+    },
+    "makeup-tests": {
+      "looked_for": "\"make-up\", \"missed exam\" or \"retake\"",
+      "scope": "section"
+    },
+    "ai-specific-limits": {
+      "looked_for": "permission or limit wording near the AI statement (\"not allowed\", \"may use ... for\", \"do not use AI to\")",
+      "scope": "section"
+    }
+  }
 }

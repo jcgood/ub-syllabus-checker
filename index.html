@@ -99,6 +99,19 @@
   details.about summary { cursor: pointer; font-weight: bold; }
   details.about ul { padding-left: 1.3rem; }
   footer { max-width: 860px; margin: 0 auto; padding: 1rem; color: var(--muted); font-size: 0.85rem; }
+  /* Section statuses: the word itself carries the meaning; the border color
+     is a supporting cue only (UB brand rule: never color alone). */
+  .status { font-weight: bold; white-space: nowrap; padding-left: 0.45rem; border-left: 5px solid var(--border); }
+  .status-complete, .status-included { border-left-color: #6da04b; }
+  .status-incomplete, .status-wording { border-left-color: #e56a54; }
+  .status-missing { border-left-color: var(--bad); }
+  .status-unreadable { border-left-color: #666666; }
+  .notice { border: 2px solid var(--bad); border-radius: 6px; padding: 0.75rem 1rem; margin: 0.75rem 0; background: #fff7f7; }
+  .notice p { margin: 0.25rem 0; }
+  .button-row { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 1rem; }
+  ul.detail-list { padding-left: 1.4rem; margin-top: 0.2rem; }
+  ul.detail-list li { margin-bottom: 0.3rem; }
+  h4 { margin: 1rem 0 0.2rem 0; font-size: 1rem; }
   .visually-hidden {
     position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
     overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
@@ -143,6 +156,19 @@
           <label><input type="checkbox" id="level-undergraduate"> Undergraduate</label>
           <label><input type="checkbox" id="level-graduate" checked> Graduate</label>
         </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>New-course proposal?</legend>
+        <label style="display:block;">
+          <input type="checkbox" id="proposal-mode" aria-describedby="proposal-help">
+          Treat every file as a new-course proposal
+        </label>
+        <p id="proposal-help" style="margin: 0.3rem 0 0 1.6rem; color: var(--muted); font-size: 0.9rem;">
+          A proposal can't have a class number yet (one is assigned when a section is scheduled), and its
+          semester and meeting times may not be set, so those lines are not counted as missing. This is
+          turned on automatically for any file that includes the Graduate School's course approval form.
+        </p>
       </fieldset>
 
       <button type="submit" id="check-btn">Check syllabus(es)</button>
@@ -228,21 +254,25 @@
 
 <footer>
   <p>Client-side only — built with <a href="https://mozilla.github.io/pdf.js/">pdf.js</a>,
-  <a href="https://docx.js.org/">docx.js</a>, and
-  <a href="https://github.com/mwilliamson/mammoth.js">mammoth.js</a>. Source: UB Academic Affairs internal tooling.</p>
+  <a href="https://pdf-lib.js.org/">pdf-lib</a>,
+  <a href="https://docx.js.org/">docx.js</a>,
+  <a href="https://stuk.github.io/jszip/">JSZip</a>, and (only if you choose OCR)
+  <a href="https://tesseract.projectnaptha.com/">tesseract.js</a>. Source: UB Academic Affairs internal tooling.</p>
 </footer>
 
-<script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script type="module">
-// mammoth.js above is a classic (non-module) UMD script that sets
-// window.mammoth -- a module script can still read it, since `type=module`
-// only isolates the module's own top-level scope, not the shared `window`.
-const mammoth = window.mammoth;
+// JSZip above is a classic (non-module) UMD script that sets window.JSZip --
+// a module script can still read it, since `type=module` only isolates the
+// module's own top-level scope, not the shared `window`. It is read inside
+// functions only (see getJSZip), so tests/run_js_tests.mjs can load this
+// code under plain Node.
 import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.min.mjs";
 import {
   Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow,
   TableCell, WidthType, AlignmentType,
 } from "https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.mjs";
+import * as PDFLib from "https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.esm.min.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.worker.min.mjs";
@@ -298,10 +328,24 @@ function isFormPage(text) {
   return FORM_SECTION_MARKERS.some((m) => lower.includes(m));
 }
 
+// Printed duplication-check emails between the cover form and the syllabus
+// -- see pdf_extract.py's EMAIL_HEADER_RE.
+const EMAIL_HEADER_RE = /^\s*(?:From|Sent|To|Cc|Subject|Date)\b\s*:?\s+\S/i;
+const EMAIL_HEADER_MIN = 3;
+
+function isEmailPage(text) {
+  return text.split("\n").slice(0, 40).filter((line) => EMAIL_HEADER_RE.test(line)).length >= EMAIL_HEADER_MIN;
+}
+
+function hasCoverForm(pages) {
+  return pages.length > 0 && pages[0].toLowerCase().includes(FORM_TITLE_MARKER);
+}
+
 function findSyllabusStartPage(pages) {
-  if (!pages.length || !pages[0].toLowerCase().includes(FORM_TITLE_MARKER)) return 0;
+  if (!hasCoverForm(pages)) return 0;
   let i = 0;
   while (i < pages.length && isFormPage(pages[i])) i++;
+  while (i < pages.length && isEmailPage(pages[i])) i++;
   return i;
 }
 
@@ -315,33 +359,54 @@ function findSyllabusStartPage(pages) {
 // the baseline moves or pdf.js marks an end of line, a space only where
 // there is a visible horizontal gap. This reproduces pdftotext's output
 // closely, so the Python-written detect patterns behave the same here.
-function pageItemsToText(items) {
+// Each item's position is also recorded as a span ({start, end} in the page
+// text, plus x/y/w/h in PDF user space) so a finding's text offset can be
+// mapped back onto the page for the annotated-PDF download. A wide gap (a
+// table column) becomes four spaces, matching pdftotext -layout closely
+// enough that analysis.py's "not a table row" heading test behaves the same.
+function pageItemsToTextWithSpans(items) {
   let text = "";
+  const spans = [];
   let prev = null;
   for (const it of items) {
+    const fontSize = Math.hypot(it.transform[2], it.transform[3]) || 10;
     if (prev && !prev.hasEOL && it.str) {
       const sameLine = Math.abs(it.transform[5] - prev.transform[5]) < 2;
       const gap = it.transform[4] - (prev.transform[4] + prev.width);
-      const fontSize = Math.hypot(it.transform[2], it.transform[3]) || 10;
       if (!sameLine) text += "\n";
+      else if (gap > fontSize * 2 && !/\s$/.test(text)) text += "    ";
       else if (gap > fontSize * 0.15 && !/\s$/.test(text) && !/^\s/.test(it.str)) text += " ";
     }
-    text += it.str;
+    // Unicode hyphens and no-break spaces -> ASCII, as pdftotext does
+    // ("In‐person" must match the same patterns as "In-person").
+    // Same length, so span offsets stay valid.
+    const str = it.str.replace(/[‐‑]/g, "-").replace(/ /g, " ");
+    if (str) {
+      spans.push({ start: text.length, end: text.length + str.length, x: it.transform[4], y: it.transform[5], w: it.width, h: fontSize });
+    }
+    text += str;
     if (it.hasEOL) text += "\n";
     prev = it;
   }
-  return text.replace(/[ \t]+/g, " ");
+  return { text, spans };
+}
+
+function pageItemsToText(items) {
+  return pageItemsToTextWithSpans(items).text;
 }
 
 async function loadPdfPages(arrayBuffer) {
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
   const pages = [];
+  const spans = [];
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    pages.push(pageItemsToText(content.items));
+    const r = pageItemsToTextWithSpans(content.items);
+    pages.push(r.text);
+    spans.push(r.spans);
   }
-  return { pdf, pages };
+  return { pdf, pages, spans };
 }
 
 // ---- Course-level auto-detection, ported from level_detection.py ----
@@ -519,34 +584,558 @@ function compareStatements(text, levels, statements) {
     .map((s) => ({ elementId: s.element_id, title: s.title, level: s.level, ...compareStatement(s.text, text) }));
 }
 
-const STATEMENT_MESSAGES = {
-  close: (pct) =>
-    `wording differs from the required Graduate School text (${pct}% of it matches) - likely an older or edited version; replace it with the current text.`,
-  not_found: (pct) =>
-    `the required Graduate School text was not found (${pct}% of it matches) - the section may be there, but not with the mandated wording.`,
+// ---- Section-aware analysis, ported line for line from analysis.py ----
+// See that module's docstring. tests/fixtures.json's "analysis" cases pin
+// this port and the Python original to the same results.
+const PAGE_SEPARATOR = "\n\f\n";
+const MIN_PAGE_WORDS = 15;
+const SHINGLE = 5;
+const MAX_DIFFS = 6;
+const CONTEXT_WORDS = 3;
+const SNIPPET_RADIUS = 50;
+const NUMBERING_RE = /^(?:[•▪●*-]\s*|\(?(?:\d{1,2}|[IVX]{1,4}|[A-Z])[.)]\s+)/;
+const ASYNC_RE = /\basynchronous\b/i;
+const TITLE_SMALL_WORDS = new Set(["and", "of", "the", "for", "in", "on", "to", "a", "an", "or", "with"]);
+const STATUS_LABELS = {
+  complete: "Complete",
+  incomplete: "Incomplete",
+  wording: "Wording differs",
+  missing: "Missing",
+  unreadable: "Can't read",
+  included: "Included",
+  not_included: "Not included",
+};
+const ITEM_LABELS = {
+  found: "found",
+  missing: "MISSING",
+  worth_a_look: "worth a look",
+  not_applicable: "not applicable",
+  check: "check by hand",
 };
 
-function detailFindings(itemResults, statementResults, missingElementIds) {
-  const out = { missingItems: [], statementIssues: [], worthALook: [], manual: [] };
-  for (const r of itemResults) {
-    if (missingElementIds.has(r.elementId)) continue;
-    const title = `${r.elementTitle} - ${r.label}`;
-    if (r.kind === "manual") {
-      out.manual.push({ title, reason: r.note || "Check by hand." });
-    } else if (r.found) {
-      continue;
-    } else if (r.kind === "required") {
-      out.missingItems.push({ title, reason: r.note || "Not found in the syllabus text." });
-    } else {
-      const qualifier = r.kind === "if_applicable" ? "only needed if it applies" : "suggested by the Graduate School page";
-      out.worthALook.push({ title, reason: `Not found (${qualifier}).` });
+const words = (s) => s.trim().split(/\s+/).filter(Boolean);
+
+function buildLayout(pages) {
+  const text = pages.join(PAGE_SEPARATOR);
+  const pageStarts = [];
+  const lines = [];
+  let pos = 0;
+  pages.forEach((page, pageIndex) => {
+    pageStarts.push(pos);
+    let lineStart = pos;
+    for (const raw of page.split("\n")) {
+      lines.push([pageIndex, lineStart, lineStart + raw.length, raw]);
+      lineStart += raw.length + 1;
+    }
+    pos += page.length + PAGE_SEPARATOR.length;
+  });
+  return { text, pageStarts, lines };
+}
+
+function pageOf(offset, pageStarts) {
+  let page = 0;
+  pageStarts.forEach((start, i) => {
+    if (start <= offset) page = i;
+  });
+  return page;
+}
+
+function makeSnippet(text, start, end, pageStarts, pages) {
+  const page = pageOf(start, pageStarts);
+  const pageStart = pageStarts[page];
+  const pageEnd = pageStart + pages[page].length;
+  const a = Math.max(pageStart, start - SNIPPET_RADIUS);
+  const b = Math.min(pageEnd, end + SNIPPET_RADIUS);
+  const quote = text.slice(a, b).replace(/\s+/g, " ").trim();
+  return (a > pageStart ? "..." : "") + quote + (b < pageEnd ? "..." : "");
+}
+
+// See analysis.py's real_word_count.
+function realWordCount(page) {
+  let n = 0;
+  for (const tok of page.split(/\s+/)) {
+    const t = tok.replace(/^[^A-Za-z]+|[^A-Za-z]+$/g, "");
+    if (/^[A-Za-z][a-z]{2,}$/.test(t)) n++;
+  }
+  return n;
+}
+
+function readability(pages) {
+  const counts = pages.map(realWordCount);
+  const low = [];
+  counts.forEach((c, i) => {
+    if (c < MIN_PAGE_WORDS) low.push(i);
+  });
+  const readable = pages.length - low.length;
+  let status;
+  if (!pages.length || readable * 2 < pages.length) status = "unreadable";
+  else if (low.length) status = "partial";
+  else status = "ok";
+  return { status, lowTextPages: low };
+}
+
+function headingShape(line) {
+  const s = line.trim().replace(NUMBERING_RE, "");
+  if (!s || !(s[0] >= "A" && s[0] <= "Z")) return null;
+  if (s.length > 70 || words(s).length > 8) return null;
+  if (/\S\s{4,}\S/.test(s)) return null;
+  if (".,;\"'”’".includes(s[s.length - 1])) return null;
+  return s;
+}
+
+function runInHeading(line, pattern) {
+  const s = line.trim().replace(NUMBERING_RE, "");
+  if (!s || !(s[0] >= "A" && s[0] <= "Z")) return null;
+  // up to three leading words: "Use of generative AI: ...", "Required Readings. ..."
+  const m = new RegExp("^((?:[A-Za-z][\\w'-]*\\s+){0,3}?(?:" + pattern + ")[^:.]{0,30}?)\\s*([:.])\\s+\\S", "i").exec(s);
+  if (!m || words(m[1]).length > 6) return null;
+  if (m[2] === ".") {
+    const isLower = (c) => c !== c.toUpperCase() && c === c.toLowerCase();
+    if (words(m[1]).some((w) => isLower(w[0]) && !TITLE_SMALL_WORDS.has(w.toLowerCase()))) return null;
+  }
+  return m[1];
+}
+
+function isGenericBoundary(shaped) {
+  const letters = shaped.replace(/[^A-Za-z]/g, "");
+  return letters.length >= 3 && (letters.toUpperCase() === letters || shaped.endsWith(":"));
+}
+
+// Multi-word heading patterns rank by list order; every single-word
+// pattern shares one tier, so among those the earliest line wins.
+const headingTier = (pattern, rank) => (/\\s/.test(pattern) ? rank : 1000);
+
+function findSections(lines, textLen, elementIds, std) {
+  const lineHits = [];
+  const boundaries = [];
+  lines.forEach(([, , , raw], idx) => {
+    const shaped = headingShape(raw);
+    const head = shaped ? shaped.split(/:\s+(?=\S)/)[0] : null;
+    const hits = {};
+    for (const elementId of elementIds) {
+      const patterns = std.headings[elementId] || [];
+      for (let rank = 0; rank < patterns.length; rank++) {
+        const pattern = patterns[rank];
+        let headingText = null;
+        if (head && new RegExp(pattern, "i").test(head)) headingText = head;
+        else headingText = runInHeading(raw, pattern);
+        if (headingText) {
+          const excluded = (std.heading_exclude[elementId] || []).some((x) => new RegExp(x, "i").test(headingText));
+          if (!excluded) hits[elementId] = [headingTier(pattern, rank), headingText];
+          break;
+        }
+      }
+    }
+    lineHits.push(hits);
+    if (Object.keys(hits).length || (shaped && isGenericBoundary(shaped))) boundaries.push(idx);
+  });
+
+  const sections = {};
+  for (const elementId of elementIds) {
+    let best = null;
+    lineHits.forEach((hits, i) => {
+      if (elementId in hits && (best === null || hits[elementId][0] < lineHits[best][elementId][0])) best = i;
+    });
+    if (best === null) continue;
+    let end = textLen;
+    for (const b of boundaries) {
+      if (b > best && !(elementId in lineHits[b])) {
+        end = lines[b][1];
+        break;
+      }
+    }
+    sections[elementId] = {
+      line: best,
+      heading: lineHits[best][elementId][1].replace(/\s+/g, " ").trim().slice(0, 80),
+      start: lines[best][1],
+      end,
+    };
+  }
+  return sections;
+}
+
+function firstMatch(text, start, end, patterns, csPatterns = []) {
+  const region = text.slice(start, end);
+  let best = null;
+  const all = patterns.map((p) => [p, "i"]).concat(csPatterns.map((p) => [p, ""]));
+  for (const [pattern, flags] of all) {
+    const m = new RegExp(pattern, flags).exec(region);
+    if (m && (best === null || m.index < best[0])) best = [m.index, m.index + m[0].length];
+  }
+  return best === null ? null : [start + best[0], start + best[1]];
+}
+
+function tokenize(s, base = 0) {
+  const out = [];
+  const re = /[A-Za-z0-9]+/g;
+  let m;
+  while ((m = re.exec(s)) !== null) out.push([m[0].toLowerCase(), base + m.index, base + m.index + m[0].length]);
+  return out;
+}
+
+function lcsOps(a, b) {
+  const n = a.length;
+  const m = b.length;
+  const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
     }
   }
-  for (const s of statementResults) {
-    if (missingElementIds.has(s.elementId) || s.status === "verbatim") continue;
-    out.statementIssues.push({ title: s.title, reason: STATEMENT_MESSAGES[s.status](Math.round(s.coverage * 100)) });
+  const steps = [];
+  let i = 0;
+  let j = 0;
+  while (i < n || j < m) {
+    if (i < n && j < m && a[i] === b[j]) {
+      steps.push(["equal", i, j]);
+      i++;
+      j++;
+    } else if (j >= m || (i < n && dp[i + 1][j] >= dp[i][j + 1])) {
+      steps.push(["delete", i, j]);
+      i++;
+    } else {
+      steps.push(["insert", i, j]);
+      j++;
+    }
+  }
+  const runs = [];
+  for (const [op, si, sj] of steps) {
+    const di = op !== "insert" ? 1 : 0;
+    const dj = op !== "delete" ? 1 : 0;
+    const last = runs[runs.length - 1];
+    if (last && last[0] === op) runs[runs.length - 1] = [op, last[1], si + di, last[3], sj + dj];
+    else runs.push([op, si, si + di, sj, sj + dj]);
+  }
+  const merged = [];
+  for (const run of runs) {
+    const prev = merged[merged.length - 1];
+    if (prev && ((prev[0] === "delete" && run[0] === "insert") || (prev[0] === "insert" && run[0] === "delete"))) {
+      merged[merged.length - 1] = [
+        "replace",
+        Math.min(prev[1], run[1]),
+        Math.max(prev[2], run[2]),
+        Math.min(prev[3], run[3]),
+        Math.max(prev[4], run[4]),
+      ];
+    } else {
+      merged.push(run);
+    }
+  }
+  return merged;
+}
+
+function compareStatementText(official, text) {
+  const oToks = tokenize(official);
+  const dToks = tokenize(text);
+  const oWords = oToks.map((t) => t[0]);
+  const dWords = dToks.map((t) => t[0]);
+  const joinedO = " " + oWords.join(" ") + " ";
+  const joinedD = " " + dWords.join(" ") + " ";
+  if (oWords.length && joinedD.includes(joinedO)) {
+    const idx = joinedD.indexOf(joinedO);
+    const first = joinedD.slice(0, idx + 1).split(" ").length - 2;
+    const window = [dToks[first][1], dToks[first + oWords.length - 1][2]];
+    return { status: "verbatim", coverage: 1.0, window, diffs: [] };
+  }
+  const oShingles = new Set();
+  for (let i = 0; i + SHINGLE <= oWords.length; i++) oShingles.add(oWords.slice(i, i + SHINGLE).join(" "));
+  if (!oShingles.size) return { status: "not_found", coverage: 0.0, window: null, diffs: [] };
+  const positions = [];
+  const found = new Set();
+  for (let i = 0; i + SHINGLE <= dWords.length; i++) {
+    const key = dWords.slice(i, i + SHINGLE).join(" ");
+    if (oShingles.has(key)) {
+      positions.push(i);
+      found.add(key);
+    }
+  }
+  const coverage = found.size / oShingles.size;
+  if (coverage < CLOSE_THRESHOLD) return { status: "not_found", coverage, window: null, diffs: [] };
+
+  const span = 2 * oWords.length;
+  let bestI = 0;
+  let bestCount = -1;
+  positions.forEach((p, i) => {
+    const count = positions.slice(i).filter((q) => q - p <= span).length;
+    if (count > bestCount) {
+      bestI = i;
+      bestCount = count;
+    }
+  });
+  const cluster = positions.slice(bestI).filter((q) => q - positions[bestI] <= span);
+  const w0 = cluster[0];
+  const w1 = Math.min(dWords.length, cluster[cluster.length - 1] + SHINGLE);
+  const windowWords = dWords.slice(w0, w1);
+
+  const runs = lcsOps(oWords, windowWords);
+  while (runs.length && runs[0][0] === "insert") runs.shift();
+  while (runs.length && runs[runs.length - 1][0] === "insert") runs.pop();
+  const diffs = [];
+  for (const [op, i0, i1, j0, j1] of runs) {
+    if (op === "equal") continue;
+    const entry = { type: { delete: "missing", insert: "added", replace: "changed" }[op], official: "", yours: "", before: "", after: "" };
+    if (i0 > 0) entry.before = official.slice(oToks[Math.max(0, i0 - CONTEXT_WORDS)][1], oToks[i0 - 1][2]);
+    if (i1 < oToks.length) entry.after = official.slice(oToks[i1][1], oToks[Math.min(oToks.length, i1 + CONTEXT_WORDS) - 1][2]);
+    if (i1 > i0) entry.official = official.slice(oToks[i0][1], oToks[i1 - 1][2]);
+    if (j1 > j0) entry.yours = text.slice(dToks[w0 + j0][1], dToks[w0 + j1 - 1][2]).replace(/\s+/g, " ");
+    diffs.push(entry);
+  }
+  return { status: "close", coverage, window: [dToks[w0][1], dToks[w1 - 1][2]], diffs: diffs.slice(0, MAX_DIFFS) };
+}
+
+const pageLabel = (pageIndex, pageOffset, paged = true) => (paged ? `p. ${pageIndex + pageOffset + 1}` : "");
+const cite = (page, quote, n) => (page ? `(${page}: "${quote.slice(0, n)}")` : `("${quote.slice(0, n)}")`);
+const at = (page) => (page ? `, ${page}` : "");
+
+// paged=false for a .docx (no fixed pages): page numbers are left out.
+function analyzeSyllabus(pages, levels, isProposal, pageOffset, std, paged = true) {
+  const { text, pageStarts, lines } = buildLayout(pages);
+  const read = readability(pages);
+  const elements = std.elements.filter((e) => applicableLevels(e, levels).length);
+  const sections = findSections(lines, text.length, elements.map((e) => e.id), std);
+  const gradingOk = checkGradingWeights(text).status === "ok";
+  const statements = {};
+  for (const s of std.statements) if (levels.includes(s.level)) statements[s.element_id] = s;
+
+  const ev = (start, end) => {
+    const page = pageOf(start, pageStarts);
+    return {
+      page_index: page,
+      offset: start - pageStarts[page],
+      length: end - start,
+      snippet: makeSnippet(text, start, end, pageStarts, pages),
+      page: pageLabel(page, pageOffset, paged),
+    };
+  };
+
+  const results = [];
+  for (const element of elements) {
+    const required = isRequired(element, levels);
+    const section = sections[element.id];
+    let heading = null;
+    if (section) {
+      heading = ev(section.start, section.start + lines[section.line][3].length);
+      heading.text = section.heading;
+    }
+
+    const itemResults = [];
+    for (const item of element.items || []) {
+      if (!levels.some((l) => item.levels.includes(l))) continue;
+      const details = std.item_details[item.id];
+      const proposal = isProposal ? details.proposal || null : null;
+      const result = { id: item.id, label: item.label, kind: item.kind, status: null, where: null, evidence: null, why: "" };
+      if (item.kind === "manual") {
+        result.status = "check";
+        result.why = item.note;
+        itemResults.push(result);
+        continue;
+      }
+      let match = null;
+      if (section && details.scope === "section") {
+        match = firstMatch(text, section.start, section.end, item.detect, item.detect_cs);
+        if (match) result.where = "section";
+      }
+      if (match === null) {
+        match = firstMatch(text, 0, text.length, item.detect, item.detect_cs);
+        if (match) result.where = section && details.scope === "section" ? "elsewhere" : "document";
+      }
+      if (match === null && item.id === "grade-combination" && gradingOk) {
+        result.status = "found";
+        result.why = "Grading percentages add up to 100%.";
+        itemResults.push(result);
+        continue;
+      }
+      if (match) {
+        result.status = "found";
+        result.evidence = ev(match[0], match[1]);
+        if (result.where === "elsewhere") {
+          result.why = "Found outside this section " + cite(result.evidence.page, result.evidence.snippet, 90) + ".";
+        }
+        itemResults.push(result);
+        continue;
+      }
+      const looked = details.looked_for;
+      const searched =
+        section && details.scope === "section"
+          ? `Searched the "${section.heading}" section and the rest of the syllabus`
+          : "Searched the whole syllabus";
+      const asyncMatch = ASYNC_RE.exec(text);
+      if (proposal === "not_applicable") {
+        result.status = "not_applicable";
+        result.why = details.proposal_note;
+      } else if (proposal === "check") {
+        result.status = "check";
+        result.why = details.proposal_note;
+      } else if (item.id === "meeting-times" && asyncMatch) {
+        result.status = "not_applicable";
+        result.evidence = ev(asyncMatch.index, asyncMatch.index + asyncMatch[0].length);
+        const page = result.evidence.page;
+        result.why = "The syllabus describes the course as asynchronous" + (page ? ` (${page})` : "") + ", so it may have no meeting times.";
+      } else if (item.kind === "required") {
+        result.status = "missing";
+        result.why = `Not found. Looked for ${looked}. ${searched}.`;
+      } else {
+        result.status = "worth_a_look";
+        const qualifier =
+          item.kind === "if_applicable"
+            ? "only needed if it applies to this course"
+            : "the Graduate School page lists it as something this section may include";
+        result.why = `Not found (${qualifier}). Looked for ${looked}.`;
+      }
+      itemResults.push(result);
+    }
+
+    let statement = null;
+    if (statements[element.id]) {
+      const spec = statements[element.id];
+      const cmp = compareStatementText(spec.text, text);
+      statement = {
+        title: spec.title,
+        status: cmp.status,
+        coverage: cmp.coverage,
+        diffs: cmp.diffs,
+        evidence: cmp.window ? ev(cmp.window[0], cmp.window[1]) : null,
+        official_text: spec.text,
+        red_flags: [],
+      };
+      let region = null;
+      if (section) region = [section.start, section.end];
+      else if (cmp.window) region = [Math.max(0, cmp.window[0] - 400), Math.min(text.length, cmp.window[1] + 400)];
+      if (region) {
+        for (const flag of spec.red_flags || []) {
+          const m = new RegExp(flag.pattern, "i").exec(text.slice(region[0], region[1]));
+          if (m) statement.red_flags.push({ message: flag.message, evidence: ev(region[0] + m.index, region[0] + m.index + m[0].length) });
+        }
+      }
+    }
+
+    let presentEvidence = heading;
+    let how = heading ? "heading" : null;
+    if (presentEvidence === null) {
+      const found = itemResults.filter((r) => r.kind === "required" && r.status === "found" && r.evidence);
+      if (found.length) {
+        // the earliest in the document, not the first in list order
+        const first = found.reduce((a, b) =>
+          b.evidence.page_index < a.evidence.page_index ||
+          (b.evidence.page_index === a.evidence.page_index && b.evidence.offset < a.evidence.offset) ? b : a
+        );
+        presentEvidence = first.evidence;
+        how = "item";
+      }
+    }
+    if (presentEvidence === null) {
+      const m = firstMatch(text, 0, text.length, element.detect);
+      if (m) {
+        presentEvidence = ev(m[0], m[1]);
+        how = "content";
+      }
+    }
+    if (presentEvidence === null && statement && statement.evidence) {
+      presentEvidence = statement.evidence;
+      how = "statement";
+    }
+    if (presentEvidence === null && element.id === "grading-policy" && gradingOk) how = "grading";
+
+    const missingItems = itemResults.filter((r) => r.status === "missing");
+    const statementBad = statement !== null && statement.status !== "verbatim";
+    let status;
+    if (read.status === "unreadable") status = "unreadable";
+    else if (!required) status = how ? "included" : "not_included";
+    else if (how === null) status = "missing";
+    else if (missingItems.length) status = "incomplete";
+    else if (statementBad || (statement && statement.red_flags.length)) status = "wording";
+    else status = "complete";
+
+    results.push({
+      id: element.id,
+      title: element.title,
+      required,
+      status,
+      how_found: how,
+      heading,
+      evidence: presentEvidence,
+      items: itemResults,
+      statement,
+      summary: elementSummary(element, status, how, presentEvidence, missingItems, statement, std),
+    });
+  }
+  return {
+    readability: read,
+    is_proposal: isProposal,
+    levels,
+    elements: results,
+    page_offset: pageOffset,
+    low_text_pages: read.lowTextPages.map((i) => pageLabel(i, pageOffset)),
+  };
+}
+
+function whereText(how, e) {
+  if (e === null) return how === "grading" ? "grading percentages add up to 100%" : "";
+  if (how === "heading") return `heading "${e.text}"${at(e.page)}`;
+  return `"${e.snippet.slice(0, 90)}"${at(e.page)}`;
+}
+
+function elementSummary(element, status, how, e, missingItems, statement, std) {
+  if (status === "unreadable") return "Could not be checked: the syllabus pages have no readable text.";
+  if (status === "not_included") return "Not included (optional).";
+  if (status === "included") return `Included (optional): ${whereText(how, e)}.`;
+  if (status === "missing") {
+    const examples = (std.heading_examples[element.id] || []).map((h) => `"${h}"`).join(" or ");
+    const headingPart = examples ? `no heading such as ${examples}` : "no matching heading";
+    return `Not found: ${headingPart}, and none of the wording this section usually has. If it is there under another label, a clear heading would help reviewers find it.`;
+  }
+  const found = `Found (${whereText(how, e)})`;
+  const pct = (x) => Math.floor(x * 100 + 0.5);
+  if (status === "incomplete") {
+    const names = missingItems.map((r) => r.label).join("; ");
+    const extra = statement && statement.status !== "verbatim" ? " The required statement wording also differs." : "";
+    return `${found}, but missing: ${names}.${extra}`;
+  }
+  if (status === "wording") {
+    if (statement.status === "not_found") {
+      return `${found}, but it does not use the required Graduate School wording (about ${pct(statement.coverage)}% of it appears).`;
+    }
+    if (statement.status === "close") {
+      return `${found}, but the wording differs from the required Graduate School text (${pct(statement.coverage)}% matches).`;
+    }
+    return `${found}; uses the required wording, but see the note below.`;
+  }
+  return `${found}.`;
+}
+
+function describeDiff(d) {
+  const before = d.before ? `...${d.before} ` : "";
+  const after = d.after ? ` ${d.after}...` : "";
+  if (d.type === "missing") return `Missing words: "${before}[${d.official}]${after}"`;
+  if (d.type === "added") return `Added words: "${before}[+ ${d.yours}]${after}"`;
+  return `Changed words: "${before}[${d.official} -> ${d.yours}]${after}"`;
+}
+
+function elementDetailLines(e, showText = false) {
+  const out = [];
+  if (e.status === "unreadable") return out;
+  for (const r of e.items) {
+    if (r.status === "found" && !r.why) continue;
+    out.push(`${r.label}: ${ITEM_LABELS[r.status]}. ${r.why}`.trimEnd());
+  }
+  const st = e.statement;
+  if (st && st.status !== "verbatim") {
+    for (const d of st.diffs) out.push(describeDiff(d));
+    if (showText || st.status === "not_found") out.push(`Required text: "${st.official_text}"`);
+  }
+  if (st) {
+    for (const flag of st.red_flags) out.push(`${flag.message} ${cite(flag.evidence.page, flag.evidence.snippet, 80)}`);
   }
   return out;
+}
+
+function statusCountsText(result) {
+  const counts = {};
+  for (const e of result.elements) if (e.required) counts[e.status] = (counts[e.status] || 0) + 1;
+  return ["missing", "incomplete", "wording", "unreadable", "complete"]
+    .filter((s) => counts[s])
+    .map((s) => `${counts[s]} ${STATUS_LABELS[s].toLowerCase()}`)
+    .join(", ");
 }
 
 const NOT_CHECKED_NOTE =
@@ -741,7 +1330,7 @@ async function accessibilityCheck(pdf, arrayBuffer, startPage) {
 
 // ---- Rendering ----
 function courseLabel(filename) {
-  const stem = filename.replace(/\.pdf$/i, "");
+  const stem = filename.replace(/\.(pdf|docx)$/i, "");
   const idx = stem.indexOf("_");
   if (idx === -1) return stem;
   return `${stem.slice(0, idx).trim()} — ${stem.slice(idx + 1).trim()}`;
@@ -756,6 +1345,22 @@ function el(tag, opts = {}, children = []) {
   return node;
 }
 
+const GRADING_LABELS = { ok: "sum to 100%", mismatch: "does NOT sum to 100%", not_found: "n/a" };
+
+function unreadableMessage(c) {
+  return (
+    `Most syllabus pages have no readable text (${c.result.low_text_pages.join(", ")}). They are probably scanned ` +
+    "images, or text drawn in fonts with no character map. Nothing is reported as missing, because the checker " +
+    "can't tell."
+  );
+}
+
+function proposalNote(c) {
+  if (!c.result.is_proposal) return null;
+  const why = c.proposalDetected ? "the Graduate School approval form was found" : "you chose proposal mode";
+  return `Treated as a new-course proposal (${why}): class number is not applicable; semester and meeting times are left for a hand check.`;
+}
+
 function renderResults(courses) {
   resultsSection.innerHTML = "";
   resultsSection.hidden = false;
@@ -763,81 +1368,124 @@ function renderResults(courses) {
   resultsSection.appendChild(el("h2", { text: "Summary" }));
   resultsSection.appendChild(el("p", { className: "page-info", text: NOT_CHECKED_NOTE }));
   const table = el("table", { className: "summary-table" });
-  const thead = el("thead", {}, [
-    el("tr", {}, [
-      el("th", { text: "Course", attrs: { scope: "col" } }),
-      el("th", { text: "Missing required items", attrs: { scope: "col" } }),
-      el("th", { text: "Grading weights", attrs: { scope: "col" } }),
-      el("th", { text: "Accessibility issues", attrs: { scope: "col" } }),
-    ]),
-  ]);
-  table.appendChild(thead);
+  table.appendChild(
+    el("thead", {}, [
+      el("tr", {}, [
+        el("th", { text: "Course", attrs: { scope: "col" } }),
+        el("th", { text: "Required sections", attrs: { scope: "col" } }),
+        el("th", { text: "Grading weights", attrs: { scope: "col" } }),
+        el("th", { text: "Accessibility issues", attrs: { scope: "col" } }),
+      ]),
+    ])
+  );
   const tbody = el("tbody");
-  const gradingLabels = { ok: "sum to 100%", mismatch: "does NOT sum to 100%", not_found: "n/a" };
   for (const c of courses) {
     const accCount = c.error ? 0 : c.accessibilityFindings.reduce((s, f) => s + f.count, 0);
     tbody.appendChild(
       el("tr", {}, [
         el("td", { text: c.label }),
-        el("td", { text: c.error ? "n/a" : String(c.missingRequired.length) }),
-        el("td", { text: c.error ? "n/a" : gradingLabels[c.gradingCheck.status] }),
-        el("td", { text: c.error ? "n/a" : c.isDocx ? "n/a" : String(accCount) }),
+        el("td", { text: c.error ? "n/a" : statusCountsText(c.result) }),
+        el("td", { text: c.error ? "n/a" : GRADING_LABELS[c.gradingCheck.status] }),
+        el("td", { text: c.error || c.isDocx ? "n/a" : String(accCount) }),
       ])
     );
   }
   table.appendChild(tbody);
   resultsSection.appendChild(table);
 
-  for (const c of courses) {
+  courses.forEach((c, courseIndex) => {
     const block = el("div", { className: "course-block" });
     block.appendChild(el("h2", { text: c.label }));
-
     if (c.error) {
       block.appendChild(el("p", { text: "Could not be checked: " + c.error }));
       resultsSection.appendChild(block);
-      continue;
+      return;
     }
-
+    const r = c.result;
     block.appendChild(
       el("p", {
         className: "page-info",
         text: c.isDocx
-          ? "Format: .docx (no page structure)."
-          : `Cover form: page(s) 1–${c.startPage}; syllabus content: page(s) ${c.startPage + 1}–${c.totalPages}.`,
+          ? "Format: Word (.docx), no page structure."
+          : c.startPage
+            ? `Cover form and emails: page(s) 1–${c.startPage}; syllabus: page(s) ${c.startPage + 1}–${c.totalPages}.`
+            : `Syllabus: page(s) 1–${c.totalPages}.`,
       })
     );
     block.appendChild(el("p", { className: "page-info", text: c.levelsReason }));
-
-    block.appendChild(el("h3", { text: "Missing / Incomplete Syllabus Elements" }));
-    if (c.missingRequired.length) {
-      const ul = el("ul", { className: "finding-list" });
-      for (const item of c.missingRequired) {
-        ul.appendChild(
-          el("li", {}, [el("strong", { text: item.title + ": " }), document.createTextNode(item.reason)])
-        );
-      }
-      block.appendChild(ul);
-    } else {
-      block.appendChild(el("p", { text: "No required elements missing." }));
+    const pn = proposalNote(c);
+    if (pn) block.appendChild(el("p", { className: "page-info", text: pn }));
+    if (c.ocrUsed) {
+      block.appendChild(el("p", { className: "page-info", text: `Text on ${c.ocrUsed} page(s) was read with OCR; quotes and wording comparisons from those pages may contain recognition errors.` }));
     }
 
-    if (c.worthALook.length) {
-      block.appendChild(el("h3", { text: "Worth a Look (only if applicable, or suggested)" }));
-      const ul = el("ul", { className: "finding-list" });
-      for (const item of c.worthALook) {
-        ul.appendChild(
-          el("li", {}, [el("strong", { text: item.title + ": " }), document.createTextNode(item.reason)])
+    const canOcr = !c.isDocx && !c.ocrUsed && r.readability.status !== "ok";
+    if (r.readability.status !== "ok") {
+      const notice = el("div", { className: "notice", attrs: { role: "note" } });
+      if (r.readability.status === "unreadable") {
+        notice.appendChild(el("p", {}, [el("strong", { text: "Can't read this syllabus. " }), document.createTextNode(unreadableMessage(c))]));
+      } else {
+        notice.appendChild(el("p", { text: `${r.low_text_pages.join(", ")} have little or no readable text; anything on those pages wasn't checked.` }));
+      }
+      if (canOcr) {
+        notice.appendChild(
+          el("p", {
+            text:
+              "Reading the pages with OCR (optical character recognition) usually fixes this. It runs in this browser and can take a minute or more; your file is not uploaded (only the OCR program and its English model are downloaded).",
+          })
+        );
+        const btn = el("button", { text: "Read with OCR and check again", attrs: { type: "button" } });
+        btn.addEventListener("click", () => rerunWithOcr(courseIndex));
+        notice.appendChild(btn);
+      }
+      block.appendChild(notice);
+    }
+
+    if (r.readability.status !== "unreadable") {
+      block.appendChild(el("h3", { text: `Required sections: ${statusCountsText(r)}` }));
+      const t = el("table", { className: "summary-table" });
+      t.appendChild(el("caption", { className: "visually-hidden", text: `Required syllabus sections for ${c.label}` }));
+      t.appendChild(
+        el("thead", {}, [
+          el("tr", {}, [
+            el("th", { text: "Section", attrs: { scope: "col" } }),
+            el("th", { text: "Status", attrs: { scope: "col" } }),
+            el("th", { text: "What the checker found", attrs: { scope: "col" } }),
+          ]),
+        ])
+      );
+      const tb = el("tbody");
+      for (const e of r.elements.filter((x) => x.required)) {
+        tb.appendChild(
+          el("tr", {}, [
+            el("th", { text: e.title, attrs: { scope: "row" } }),
+            el("td", {}, [el("span", { className: `status status-${e.status}`, text: STATUS_LABELS[e.status] })]),
+            el("td", { text: e.summary }),
+          ])
         );
       }
-      block.appendChild(ul);
+      t.appendChild(tb);
+      block.appendChild(t);
+
+      const detailed = r.elements.filter((e) => e.required && courseDetailLines(c, e).length);
+      if (detailed.length) {
+        block.appendChild(el("h3", { text: "Details" }));
+        for (const e of detailed) {
+          block.appendChild(el("h4", { text: `${e.title} — ${STATUS_LABELS[e.status]}` }));
+          const ul = el("ul", { className: "detail-list" });
+          for (const line of courseDetailLines(c, e)) ul.appendChild(el("li", { text: line }));
+          block.appendChild(ul);
+        }
+      }
+      const included = r.elements.filter((e) => !e.required && e.status === "included").map((e) => e.title);
+      block.appendChild(el("p", { text: "Optional sections included: " + (included.join(", ") || "none") + "." }));
     }
 
     if (c.gradingCheck.status !== "not_found") {
       block.appendChild(el("h3", { text: "Grading Weight Check" }));
       block.appendChild(el("p", { text: c.gradingCheck.message }));
     }
-
-    if (c.codeNote) {
+    if (c.codeNote && r.readability.status !== "unreadable") {
       block.appendChild(el("h3", { text: "Course Code Format (informational)" }));
       block.appendChild(el("p", { text: c.codeNote }));
     }
@@ -848,139 +1496,437 @@ function renderResults(courses) {
     } else if (c.accessibilityFindings.length) {
       const ul = el("ul", { className: "finding-list" });
       for (const f of c.accessibilityFindings) {
-        ul.appendChild(
-          el("li", {}, [
-            document.createTextNode(f.label + " "),
-            el("span", { className: "count-tag", text: `(${f.count} occurrence(s))` }),
-          ])
-        );
+        ul.appendChild(el("li", {}, [document.createTextNode(f.label + " "), el("span", { className: "count-tag", text: `(${f.count} occurrence(s))` })]));
       }
       block.appendChild(ul);
     } else {
       block.appendChild(el("p", { text: "No accessibility issues detected in the syllabus pages (degraded check)." }));
     }
 
+    const row = el("div", { className: "button-row" });
+    const annotLabel = c.isDocx ? "Download annotated Word file" : "Download annotated PDF";
+    const annotBtn = el("button", { text: annotLabel, className: "secondary", attrs: { type: "button", "aria-describedby": `annot-help-${courseIndex}` } });
+    annotBtn.addEventListener("click", () => downloadAnnotated(c));
+    row.appendChild(annotBtn);
+    block.appendChild(row);
+    block.appendChild(
+      el("p", {
+        className: "page-info",
+        attrs: { id: `annot-help-${courseIndex}` },
+        text: c.isDocx
+          ? "A copy of the Word file with a comment on each section that needs attention, plus a summary comment at the top."
+          : "A copy of the PDF with a highlight plus a note beside each section that needs attention, and a summary page added at the end.",
+      })
+    );
     resultsSection.appendChild(block);
-  }
+  });
 
-  resultsSection.appendChild(
-    el("button", { text: "Download report (.docx)", className: "secondary", attrs: { type: "button", id: "download-btn" } })
-  );
-  document.getElementById("download-btn").addEventListener("click", () => downloadDocx(courses));
+  const reportBtn = el("button", { text: "Download report (.docx)", className: "secondary", attrs: { type: "button", id: "download-btn" } });
+  reportBtn.addEventListener("click", () => downloadDocx(courses));
+  resultsSection.appendChild(el("div", { className: "button-row" }, [reportBtn]));
 }
 
-// ---- docx generation ----
+// ---- Shared note text for annotations ----
+const OCR_WORDING_CAVEAT =
+  "This text was read with OCR, so some of these word differences may be recognition errors; compare against the page itself.";
+
+// Detail lines for one section, plus the OCR caveat when a wording
+// comparison was made on OCR'd text.
+function courseDetailLines(c, e) {
+  const lines = elementDetailLines(e);
+  if (c.ocrUsed && e.statement && e.statement.status !== "verbatim" && e.statement.diffs.length) lines.push(OCR_WORDING_CAVEAT);
+  return lines;
+}
+
+function annotationLines(c, e) {
+  return [`${e.title}: ${STATUS_LABELS[e.status]}`, e.summary, ...courseDetailLines(c, e)];
+}
+
+function sectionsNeedingAttention(result) {
+  return result.elements.filter((e) => e.required && !["complete", "unreadable"].includes(e.status));
+}
+
+function summaryLines(c) {
+  const r = c.result;
+  const lines = [`Automated syllabus screen: ${c.label}`, `Checked ${new Date().toLocaleDateString()} against UB's Graduate Course Syllabus Guidelines. Heuristic only; confirm each note against the document.`];
+  const pn = proposalNote(c);
+  if (pn) lines.push(pn);
+  if (r.readability.status === "unreadable") {
+    lines.push("Can't read this syllabus: " + unreadableMessage(c));
+    return lines;
+  }
+  lines.push(`Required sections: ${statusCountsText(r)}.`);
+  for (const e of r.elements.filter((x) => x.required)) lines.push(`${STATUS_LABELS[e.status]}: ${e.title}. ${e.summary}`);
+  lines.push(NOT_CHECKED_NOTE);
+  return lines;
+}
+
+// ---- Annotated PDF (pdf-lib) ----
+// Text drawn with pdf-lib's standard fonts must be WinAnsi; replace anything else.
+function winAnsi(s) {
+  return s
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/[–—]/g, "-")
+    .replace(/…/g, "...")
+    .replace(/[^\x09\x0a\x0d\x20-\x7e\xa0-\xff]/g, "?");
+}
+
+function wrapText(text, font, size, maxWidth) {
+  const out = [];
+  for (const para of winAnsi(text).split("\n")) {
+    let line = "";
+    for (const word of para.split(/\s+/).filter(Boolean)) {
+      const trial = line ? line + " " + word : word;
+      if (font.widthOfTextAtSize(trial, size) <= maxWidth || !line) line = trial;
+      else {
+        out.push(line);
+        line = word;
+      }
+    }
+    out.push(line);
+  }
+  return out;
+}
+
+// Rectangles (one per text line) covering page-text offsets [start, end).
+function rectsForRange(spans, start, end) {
+  const hit = spans.filter((s) => s.end > start && s.start < end);
+  const rows = [];
+  for (const s of hit) {
+    const row = rows.find((r) => Math.abs(r.y - s.y) < s.h * 0.5);
+    if (row) {
+      row.x0 = Math.min(row.x0, s.x);
+      row.x1 = Math.max(row.x1, s.x + s.w);
+      row.h = Math.max(row.h, s.h);
+    } else {
+      rows.push({ x0: s.x, x1: s.x + s.w, y: s.y, h: s.h });
+    }
+  }
+  return rows;
+}
+
+function addPdfNote(doc, page, x, y, lines, color) {
+  const { PDFHexString, PDFString } = PDFLib;
+  const annot = doc.context.obj({
+    Type: "Annot",
+    Subtype: "Text",
+    Rect: [x, y, x + 18, y + 18],
+    Contents: PDFHexString.fromText(lines.join("\n")),
+    T: PDFHexString.fromText("Syllabus checker"),
+    Name: "Comment",
+    C: color,
+    F: 4,
+    Open: false,
+    M: PDFString.fromDate(new Date()),
+  });
+  page.node.addAnnot(doc.context.register(annot));
+}
+
+async function buildAnnotatedPdf(c) {
+  const { PDFDocument, StandardFonts, rgb } = PDFLib;
+  const doc = await PDFDocument.load(c.pdfBuf.slice(0), { ignoreEncryption: true });
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const original = doc.getPages();
+
+  // Notes on the syllabus pages.
+  const needing = sectionsNeedingAttention(c.result);
+  const unanchored = [];
+  for (const e of needing) {
+    const anchor = e.heading || e.evidence;
+    if (!anchor) {
+      unanchored.push(e);
+      continue;
+    }
+    const pageIndex = c.startPage + anchor.page_index;
+    const page = original[pageIndex];
+    const spans = (c.spans && c.spans[pageIndex]) || [];
+    const length = e.heading ? Math.max(anchor.length, 1) : Math.min(Math.max(anchor.length, 1), 200);
+    const rects = rectsForRange(spans, anchor.offset, anchor.offset + length);
+    const color = e.status === "missing" ? [0.65, 0, 0.1] : [0.9, 0.42, 0.33];
+    if (rects.length) {
+      for (const rc of rects) {
+        page.drawRectangle({ x: rc.x0 - 1, y: rc.y - rc.h * 0.25, width: rc.x1 - rc.x0 + 2, height: rc.h * 1.2, color: rgb(1, 0.85, 0.2), opacity: 0.35 });
+      }
+      const top = rects[0];
+      addPdfNote(doc, page, Math.max(2, Math.min(top.x0 - 22, page.getWidth() - 22)), top.y - 2, annotationLines(c, e), color);
+    } else {
+      addPdfNote(doc, page, 4, page.getHeight() - 26, annotationLines(c, e), color);
+    }
+  }
+  const firstSyllabus = original[Math.min(c.startPage, original.length - 1)];
+  if (unanchored.length && firstSyllabus) {
+    const lines = ["Sections not found anywhere in this syllabus:"];
+    for (const e of unanchored) lines.push(`- ${e.title}: ${e.summary}`);
+    addPdfNote(doc, firstSyllabus, 4, firstSyllabus.getHeight() - 48, lines, [0.65, 0, 0.1]);
+  }
+
+  // Summary page(s) at the END, so every page number in the notes still
+  // matches the original file; a note on page 1 points to it.
+  const summaryPageNumber = original.length + 1;
+  addPdfNote(doc, original[0], 4, original[0].getHeight() - 26,
+    [`Syllabus checker: ${statusCountsText(c.result) || "see summary"}.`, `Full review summary on page ${summaryPageNumber}. Page numbers in every note refer to this file's original pages.`],
+    [0, 0.36, 0.73]);
+  const [w, h] = [612, 792];
+  const margin = 54;
+  let page = doc.addPage([w, h]);
+  let y = h - margin;
+  const newPage = () => {
+    page = doc.addPage([w, h]);
+    y = h - margin;
+  };
+  const write = (text, f, size, gap = 4) => {
+    for (const line of wrapText(text, f, size, w - 2 * margin)) {
+      if (y < margin + size) newPage();
+      page.drawText(line, { x: margin, y: y - size, size, font: f, color: rgb(0.1, 0.1, 0.1) });
+      y -= size + 3;
+    }
+    y -= gap;
+  };
+  const lines = summaryLines(c);
+  write("Syllabus review summary (added by the UB Syllabus Compliance Checker)", bold, 14, 8);
+  lines.forEach((line, i) => write(line, i === 0 ? bold : font, i === 0 ? 11 : 9.5));
+  write("Notes: each section that needs attention is highlighted on its page, with a note icon beside it; open the note for details.", font, 9.5);
+  return doc.save();
+}
+
+// ---- Annotated Word file (comments added to the original .docx XML) ----
+const W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+const XML_DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
+
+function getJSZip() {
+  if (!window.JSZip) throw new Error("The JSZip library did not load; check your connection and reload.");
+  return window.JSZip;
+}
+
+// Paragraph text in document order. Each text node is credited to its
+// nearest enclosing <w:p>, so a text box nested inside a paragraph doesn't
+// duplicate text. Returns { text, paragraphs: [{start, end, el}] }.
+function docxParagraphs(xmlDoc) {
+  const paragraphs = [];
+  const byEl = new Map();
+  const all = xmlDoc.getElementsByTagNameNS(W_NS, "*");
+  for (const node of all) {
+    const name = node.localName;
+    if (name === "p") {
+      const entry = { el: node, text: "" };
+      byEl.set(node, entry);
+      paragraphs.push(entry);
+      continue;
+    }
+    if (name !== "t" && name !== "tab" && name !== "br" && name !== "cr") continue;
+    let p = node.parentNode;
+    while (p && !(p.namespaceURI === W_NS && p.localName === "p")) p = p.parentNode;
+    const entry = p && byEl.get(p);
+    if (!entry) continue;
+    entry.text += name === "t" ? node.textContent : name === "tab" ? "\t" : "\n";
+  }
+  let pos = 0;
+  const out = [];
+  for (const p of paragraphs) {
+    out.push({ start: pos, end: pos + p.text.length, el: p.el });
+    pos += p.text.length + 1;
+  }
+  return { text: paragraphs.map((p) => p.text).join("\n"), paragraphs: out };
+}
+
+function wEl(doc, name, attrs = {}) {
+  const node = doc.createElementNS(W_NS, "w:" + name);
+  for (const [k, v] of Object.entries(attrs)) node.setAttributeNS(W_NS, "w:" + k, v);
+  return node;
+}
+
+async function buildAnnotatedDocx(c) {
+  const JSZip = getJSZip();
+  const zip = await JSZip.loadAsync(c.docxBuf.slice(0));
+  const parser = new DOMParser();
+  const serializer = new XMLSerializer();
+  const docXml = parser.parseFromString(await zip.file("word/document.xml").async("string"), "application/xml");
+  const { paragraphs } = docxParagraphs(docXml);
+
+  let commentsXml;
+  const existing = zip.file("word/comments.xml");
+  if (existing) {
+    commentsXml = parser.parseFromString(await existing.async("string"), "application/xml");
+  } else {
+    commentsXml = parser.parseFromString(`<w:comments xmlns:w="${W_NS}"/>`, "application/xml");
+  }
+  const root = commentsXml.documentElement;
+  let nextId = 0;
+  for (const cm of commentsXml.getElementsByTagNameNS(W_NS, "comment")) {
+    nextId = Math.max(nextId, parseInt(cm.getAttributeNS(W_NS, "id") || cm.getAttribute("w:id") || "0", 10) + 1);
+  }
+  const date = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+
+  const addComment = (paraIndex, lines) => {
+    const target = paragraphs[Math.max(0, Math.min(paraIndex, paragraphs.length - 1))];
+    if (!target) return;
+    const id = String(nextId++);
+    const comment = wEl(commentsXml, "comment", { id, author: "Syllabus checker", date, initials: "SC" });
+    for (const line of lines) {
+      const p = wEl(commentsXml, "p");
+      const r = wEl(commentsXml, "r");
+      const t = wEl(commentsXml, "t");
+      t.setAttribute("xml:space", "preserve");
+      t.textContent = line;
+      r.appendChild(t);
+      p.appendChild(r);
+      comment.appendChild(p);
+    }
+    root.appendChild(comment);
+    const p = target.el;
+    const pPr = Array.from(p.childNodes).find((n) => n.namespaceURI === W_NS && n.localName === "pPr");
+    const start = wEl(docXml, "commentRangeStart", { id });
+    if (pPr) p.insertBefore(start, pPr.nextSibling);
+    else p.insertBefore(start, p.firstChild);
+    p.appendChild(wEl(docXml, "commentRangeEnd", { id }));
+    const run = wEl(docXml, "r");
+    run.appendChild(wEl(docXml, "commentReference", { id }));
+    p.appendChild(run);
+  };
+
+  const paraAt = (offset) => {
+    const i = paragraphs.findIndex((p) => offset >= p.start && offset <= p.end);
+    return i === -1 ? 0 : i;
+  };
+
+  addComment(0, summaryLines(c));
+  const unanchored = [];
+  for (const e of sectionsNeedingAttention(c.result)) {
+    const anchor = e.heading || e.evidence;
+    if (!anchor) unanchored.push(e);
+    else addComment(paraAt(anchor.offset), annotationLines(c, e));
+  }
+  if (unanchored.length) {
+    addComment(0, ["Sections not found anywhere in this syllabus:", ...unanchored.map((e) => `- ${e.title}: ${e.summary}`)]);
+  }
+
+  zip.file("word/document.xml", XML_DECL + serializer.serializeToString(docXml).replace(/^<\?xml[^>]*\?>\s*/, ""));
+  zip.file("word/comments.xml", XML_DECL + serializer.serializeToString(commentsXml).replace(/^<\?xml[^>]*\?>\s*/, ""));
+
+  const relsPath = "word/_rels/document.xml.rels";
+  let rels = await zip.file(relsPath).async("string");
+  if (!rels.includes("relationships/comments")) {
+    rels = rels.replace(
+      "</Relationships>",
+      '<Relationship Id="rIdSyllabusChecker1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="comments.xml"/></Relationships>'
+    );
+    zip.file(relsPath, rels);
+  }
+  let types = await zip.file("[Content_Types].xml").async("string");
+  if (!types.includes("/word/comments.xml")) {
+    types = types.replace(
+      "</Types>",
+      '<Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/></Types>'
+    );
+    zip.file("[Content_Types].xml", types);
+  }
+  return zip.generateAsync({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+}
+
+async function downloadAnnotated(c) {
+  setStatus(`Building the annotated copy of ${c.fileName}…`);
+  try {
+    const stem = c.fileName.replace(/\.(pdf|docx)$/i, "");
+    if (c.isDocx) {
+      downloadBlob(await buildAnnotatedDocx(c), `${stem} - reviewed.docx`);
+    } else {
+      const bytes = await buildAnnotatedPdf(c);
+      downloadBlob(new Blob([bytes], { type: "application/pdf" }), `${stem} - reviewed.pdf`);
+    }
+    setStatus("Annotated copy downloaded.");
+  } catch (err) {
+    console.error(err);
+    setStatus("Could not build the annotated copy: " + err.message, true);
+  }
+}
+
+// ---- docx report (docx.js) ----
 async function buildDocx(courses) {
   const children = [];
+  const para = (text, opts = {}) => new Paragraph({ children: [new TextRun({ text, ...opts })] });
   children.push(new Paragraph({ text: "Graduate Syllabus Review", heading: HeadingLevel.TITLE, alignment: AlignmentType.CENTER }));
   children.push(
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      children: [new TextRun({ text: `Required-element and PDF accessibility findings — ${courses.length} course(s)`, italics: true })],
+      children: [new TextRun({ text: `Syllabus-element and PDF accessibility findings — ${courses.length} course(s)`, italics: true })],
     })
   );
   children.push(
-    new Paragraph({
-      text:
-        "Scope: syllabus content only, checked against UB's Graduate Course Syllabus Guidelines. " +
-        "Each PDF's “New Graduate Course Approval Request Form” cover pages are excluded from both checks. " +
-        "This browser-based tool runs a heuristic content check plus a DEGRADED accessibility screen " +
-        "(no full PDF/UA-1 validation) — confirm findings against the actual document before acting on them.",
-    })
+    para(
+      "Scope: syllabus content only, checked against UB's Graduate Course Syllabus Guidelines. Each PDF's “New Graduate Course Approval Request Form” cover pages, and any printed emails after them, are excluded. Each required section is marked Complete, Incomplete (present but missing specific lines), Wording differs (a mandated statement isn't the required text), Missing, or Can't read (no readable text). This browser-based tool's accessibility screen is DEGRADED (no full PDF/UA-1 validation). Confirm findings against the actual document before acting on them."
+    )
   );
-  children.push(new Paragraph({ text: NOT_CHECKED_NOTE }));
+  children.push(para(NOT_CHECKED_NOTE));
 
+  const cell = (t, bold = false) => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: t, bold })] })] });
   children.push(new Paragraph({ text: "Summary", heading: HeadingLevel.HEADING_1 }));
-  const gradingLabels = { ok: "sum to 100%", mismatch: "does NOT sum to 100%", not_found: "n/a" };
-  const headerRow = new TableRow({
-    children: ["Course", "Missing required items", "Grading weights", "Accessibility issues"].map(
-      (t) => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: t, bold: true })] })] })
-    ),
-  });
-  const dataRows = courses.map((c) => {
+  const summaryRows = [new TableRow({ children: ["Course", "Required sections", "Grading weights", "Accessibility issues"].map((t) => cell(t, true)) })];
+  for (const c of courses) {
     const accCount = c.error ? 0 : c.accessibilityFindings.reduce((s, f) => s + f.count, 0);
-    return new TableRow({
-      children: [
-        c.label,
-        c.error ? "n/a" : String(c.missingRequired.length),
-        c.error ? "n/a" : gradingLabels[c.gradingCheck.status],
-        c.error ? "n/a" : c.isDocx ? "n/a" : String(accCount),
-      ].map((t) => new TableCell({ children: [new Paragraph(t)] })),
-    });
-  });
-  children.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: [headerRow, ...dataRows] }));
+    summaryRows.push(
+      new TableRow({
+        children: [
+          cell(c.label),
+          cell(c.error ? "n/a" : statusCountsText(c.result)),
+          cell(c.error ? "n/a" : GRADING_LABELS[c.gradingCheck.status]),
+          cell(c.error || c.isDocx ? "n/a" : String(accCount)),
+        ],
+      })
+    );
+  }
+  children.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: summaryRows }));
 
   for (const c of courses) {
     children.push(new Paragraph({ text: c.label, heading: HeadingLevel.HEADING_1 }));
     if (c.error) {
-      children.push(new Paragraph("Could not be checked: " + c.error));
+      children.push(para("Could not be checked: " + c.error));
       continue;
     }
-    children.push(
-      new Paragraph({
-        children: [
-          new TextRun({
-            italics: true,
-            text: c.isDocx
-              ? "Format: .docx (no page structure)."
-              : `Cover form: page(s) 1–${c.startPage}; syllabus content: page(s) ${c.startPage + 1}–${c.totalPages}.`,
-          }),
-        ],
-      })
-    );
-    children.push(new Paragraph({ children: [new TextRun({ italics: true, text: c.levelsReason })] }));
+    const r = c.result;
+    children.push(para(c.levelsReason, { italics: true }));
+    const pn = proposalNote(c);
+    if (pn) children.push(para(pn, { italics: true }));
+    if (c.ocrUsed) children.push(para(`Text on ${c.ocrUsed} page(s) was read with OCR.`, { italics: true }));
 
-    children.push(new Paragraph({ text: "Missing / Incomplete Syllabus Elements", heading: HeadingLevel.HEADING_2 }));
-    if (c.missingRequired.length) {
-      for (const item of c.missingRequired) {
-        children.push(
-          new Paragraph({
-            bullet: { level: 0 },
-            children: [new TextRun({ text: item.title + ": ", bold: true }), new TextRun(item.reason)],
-          })
-        );
-      }
+    children.push(new Paragraph({ text: "Syllabus Sections", heading: HeadingLevel.HEADING_2 }));
+    if (r.readability.status === "unreadable") {
+      children.push(new Paragraph({ children: [new TextRun({ text: "Can't read this syllabus. ", bold: true }), new TextRun(unreadableMessage(c))] }));
     } else {
-      children.push(new Paragraph("No required elements missing."));
-    }
-
-    if (c.worthALook.length) {
-      children.push(new Paragraph({ text: "Worth a Look (only if applicable, or suggested)", heading: HeadingLevel.HEADING_2 }));
-      for (const item of c.worthALook) {
-        children.push(
-          new Paragraph({
-            bullet: { level: 0 },
-            children: [new TextRun({ text: item.title + ": ", bold: true }), new TextRun(item.reason)],
-          })
-        );
+      if (r.readability.status === "partial") {
+        children.push(para(`${r.low_text_pages.join(", ")} have little or no readable text; anything on those pages wasn't checked.`));
       }
+      const rows = [new TableRow({ children: ["Section", "Status", "What the checker found"].map((t) => cell(t, true)) })];
+      for (const e of r.elements.filter((x) => x.required)) {
+        rows.push(new TableRow({ children: [cell(e.title), cell(STATUS_LABELS[e.status], e.status !== "complete"), cell(e.summary)] }));
+      }
+      children.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows }));
+      for (const e of r.elements.filter((x) => x.required)) {
+        const lines = courseDetailLines(c, e);
+        if (!lines.length) continue;
+        children.push(new Paragraph({ text: `${e.title} — ${STATUS_LABELS[e.status]}`, heading: HeadingLevel.HEADING_3 }));
+        for (const line of lines) children.push(new Paragraph({ bullet: { level: 0 }, text: line }));
+      }
+      const included = r.elements.filter((e) => !e.required && e.status === "included").map((e) => e.title);
+      children.push(para("Optional sections included: " + (included.join(", ") || "none") + "."));
     }
 
     if (c.gradingCheck.status !== "not_found") {
       children.push(new Paragraph({ text: "Grading Weight Check", heading: HeadingLevel.HEADING_2 }));
-      children.push(new Paragraph(c.gradingCheck.message));
+      children.push(para(c.gradingCheck.message));
     }
-
-    if (c.codeNote) {
+    if (c.codeNote && r.readability.status !== "unreadable") {
       children.push(new Paragraph({ text: "Course Code Format (informational)", heading: HeadingLevel.HEADING_2 }));
-      children.push(new Paragraph(c.codeNote));
+      children.push(para(c.codeNote));
     }
-
     children.push(new Paragraph({ text: "PDF Accessibility (ADA / PDF-UA) Issues — degraded check", heading: HeadingLevel.HEADING_2 }));
-    if (c.accessibilityNote) {
-      children.push(new Paragraph(c.accessibilityNote));
-    } else if (c.accessibilityFindings.length) {
+    if (c.accessibilityNote) children.push(para(c.accessibilityNote));
+    else if (c.accessibilityFindings.length) {
       for (const f of c.accessibilityFindings) {
-        children.push(
-          new Paragraph({
-            bullet: { level: 0 },
-            children: [new TextRun(f.label + " "), new TextRun({ text: `(${f.count} occurrence(s))`, italics: true })],
-          })
-        );
+        children.push(new Paragraph({ bullet: { level: 0 }, children: [new TextRun(f.label + " "), new TextRun({ text: `(${f.count} occurrence(s))`, italics: true })] }));
       }
-    } else {
-      children.push(new Paragraph("No accessibility issues detected in the syllabus pages (degraded check)."));
-    }
+    } else children.push(para("No accessibility issues detected in the syllabus pages (degraded check)."));
   }
 
   const doc = new Document({ sections: [{ children }] });
@@ -995,14 +1941,13 @@ function downloadBlob(blob, filename) {
   document.body.appendChild(a);
   a.click();
   a.remove();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 async function downloadDocx(courses) {
   setStatus("Building .docx report…");
   try {
-    const blob = await buildDocx(courses);
-    downloadBlob(blob, "syllabus_review_report.docx");
+    downloadBlob(await buildDocx(courses), "syllabus_review_report.docx");
     setStatus("Report downloaded.");
   } catch (err) {
     console.error(err);
@@ -1010,42 +1955,134 @@ async function downloadDocx(courses) {
   }
 }
 
-// ---- Per-file-type extraction ----
-async function processPdf(file) {
-  const buf = await file.arrayBuffer();
-  // pdf.js takes ownership of (detaches) the ArrayBuffer passed to
-  // getDocument -- pass it a copy so `buf` stays readable afterward for
-  // accessibilityCheck's own raw-byte language scan.
-  const { pdf, pages } = await loadPdfPages(buf.slice(0));
-  const startPage = findSyllabusStartPage(pages);
-  const syllabusText = pages.slice(startPage).join("\n");
-  return {
-    syllabusText,
-    startPage,
-    totalPages: pdf.numPages,
-    firstPageForLevel: pages[startPage] || "",
-    pdf,
-    buf,
-  };
+// ---- OCR (tesseract.js, loaded only when asked for) ----
+const TESSERACT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
+const OCR_SCALE = 2;
+
+async function loadTesseract() {
+  if (window.Tesseract) return window.Tesseract;
+  await new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = TESSERACT_URL;
+    s.onload = resolve;
+    s.onerror = () => reject(new Error("Could not load the OCR library (check your connection)."));
+    document.head.appendChild(s);
+  });
+  return window.Tesseract;
 }
 
-async function processDocx(file) {
-  const buf = await file.arrayBuffer();
-  const result = await mammoth.extractRawText({ arrayBuffer: buf });
-  const fullText = result.value;
-  // A .docx has no page structure to split on the way a PDF does; cover-form
-  // detection still runs (harmless if this isn't a Grad School approval
-  // packet -- findSyllabusStartPage only skips pages that open with the
-  // form's own title, so an ordinary syllabus is left untouched at index 0).
-  const pages = [fullText];
-  const startPage = findSyllabusStartPage(pages);
-  const syllabusText = pages.slice(startPage).join("\n");
-  return {
-    syllabusText,
-    startPage,
-    totalPages: 1,
-    firstPageForLevel: syllabusText.slice(0, 2000),
-  };
+// OCR one page; returns {text, spans} in the same shape as
+// pageItemsToTextWithSpans, with word boxes converted to PDF coordinates.
+async function ocrPage(worker, pdf, pageNumber) {
+  const page = await pdf.getPage(pageNumber);
+  const viewport = page.getViewport({ scale: OCR_SCALE });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.ceil(viewport.width);
+  canvas.height = Math.ceil(viewport.height);
+  await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+  const { data } = await worker.recognize(canvas);
+  let text = "";
+  const spans = [];
+  const lines = data.lines && data.lines.length ? data.lines : null;
+  if (!lines) return { text: data.text || "", spans };
+  for (const line of lines) {
+    const lineWords = (line.words || []).filter((wd) => wd.text && wd.text.trim());
+    lineWords.forEach((wd, i) => {
+      if (i > 0) text += " ";
+      const [x0, y0] = viewport.convertToPdfPoint(wd.bbox.x0, wd.bbox.y1);
+      const [x1, y1] = viewport.convertToPdfPoint(wd.bbox.x1, wd.bbox.y0);
+      spans.push({ start: text.length, end: text.length + wd.text.length, x: Math.min(x0, x1), y: Math.min(y0, y1), w: Math.abs(x1 - x0), h: Math.abs(y1 - y0) });
+      text += wd.text;
+    });
+    text += "\n";
+  }
+  return { text, spans };
+}
+
+async function rerunWithOcr(courseIndex) {
+  const c = lastCourses[courseIndex];
+  setStatus(`Loading OCR for ${c.fileName}…`);
+  try {
+    const Tesseract = await loadTesseract();
+    const worker = await Tesseract.createWorker("eng");
+    const { pdf, pages, spans } = c.rawPdf;
+    const low = readability(pages).lowTextPages;
+    const newPages = pages.slice();
+    const newSpans = spans.slice();
+    for (let k = 0; k < low.length; k++) {
+      setStatus(`OCR: page ${low[k] + 1} (${k + 1} of ${low.length}) of ${c.fileName}…`);
+      const r = await ocrPage(worker, pdf, low[k] + 1);
+      newPages[low[k]] = r.text;
+      newSpans[low[k]] = r.spans;
+    }
+    await worker.terminate();
+    lastCourses[courseIndex] = await analyzeFile(c.file, c.options, { pdf, pages: newPages, spans: newSpans, buf: c.pdfBuf, ocrUsed: low.length });
+    renderResults(lastCourses);
+    setStatus(`OCR finished for ${c.fileName} (${low.length} page(s)); results updated.`);
+  } catch (err) {
+    console.error(err);
+    setStatus("OCR failed: " + err.message, true);
+  }
+}
+
+// ---- Per-file analysis ----
+async function analyzeFile(file, options, pdfOverride = null) {
+  const isDocx = /\.docx$/i.test(file.name);
+  const std = options.std;
+  const course = { label: courseLabel(file.name), fileName: file.name, file, options, isDocx, ocrUsed: 0 };
+
+  let syllabusPages;
+  if (isDocx) {
+    const buf = await file.arrayBuffer();
+    const JSZip = getJSZip();
+    const zip = await JSZip.loadAsync(buf.slice(0));
+    const docFile = zip.file("word/document.xml");
+    if (!docFile) throw new Error("This .docx has no word/document.xml (is it a Word file?)");
+    const xml = new DOMParser().parseFromString(await docFile.async("string"), "application/xml");
+    const { text } = docxParagraphs(xml);
+    course.docxBuf = buf;
+    course.startPage = 0;
+    course.totalPages = 1;
+    course.proposalDetected = text.slice(0, 3000).toLowerCase().includes(FORM_TITLE_MARKER);
+    syllabusPages = [text];
+  } else {
+    let raw = pdfOverride;
+    if (!raw) {
+      const buf = await file.arrayBuffer();
+      // pdf.js detaches the ArrayBuffer it is given -- pass it a copy.
+      const loaded = await loadPdfPages(buf.slice(0));
+      raw = { ...loaded, buf, ocrUsed: 0 };
+    }
+    course.rawPdf = { pdf: raw.pdf, pages: raw.pages, spans: raw.spans };
+    course.pdfBuf = raw.buf;
+    course.ocrUsed = raw.ocrUsed || 0;
+    course.startPage = findSyllabusStartPage(raw.pages);
+    course.totalPages = raw.pdf.numPages;
+    course.proposalDetected = hasCoverForm(raw.pages);
+    course.spans = raw.spans;
+    syllabusPages = raw.pages.slice(course.startPage);
+  }
+
+  const firstPage = (syllabusPages[0] || "").slice(0, 2000);
+  if (options.autoMode) {
+    ({ levels: course.levels, reason: course.levelsReason } = detectCourseLevels(firstPage, file.name));
+  } else {
+    course.levels = options.manualLevels;
+    course.levelsReason = "Manually set to: " + options.manualLevels.join(", ") + ".";
+  }
+  const isProposal = options.proposal || course.proposalDetected;
+  course.result = analyzeSyllabus(syllabusPages, course.levels, isProposal, course.startPage, std, !isDocx);
+  const joined = syllabusPages.join(PAGE_SEPARATOR);
+  course.gradingCheck = checkGradingWeights(joined);
+  course.codeNote = checkPreciseCourseCode(firstPage);
+  if (isDocx) {
+    course.accessibilityFindings = [];
+    course.accessibilityNote = "Not available for .docx files — PDF/UA is a PDF-specific accessibility standard. Export to PDF to run this check.";
+  } else {
+    course.accessibilityFindings = await accessibilityCheck(course.rawPdf.pdf, course.pdfBuf, course.startPage);
+    course.accessibilityNote = null;
+  }
+  return course;
 }
 
 // ---- Orchestration ----
@@ -1057,7 +2094,7 @@ form.addEventListener("submit", async (e) => {
     return;
   }
   const autoMode = document.getElementById("level-mode-auto").checked;
-  let manualLevels = [];
+  const manualLevels = [];
   if (!autoMode) {
     if (document.getElementById("level-undergraduate").checked) manualLevels.push("undergraduate");
     if (document.getElementById("level-graduate").checked) manualLevels.push("graduate");
@@ -1066,67 +2103,24 @@ form.addEventListener("submit", async (e) => {
       return;
     }
   }
+  const proposal = document.getElementById("proposal-mode").checked;
 
   checkBtn.disabled = true;
   resultsSection.hidden = true;
   try {
     setStatus("Loading policy standards…");
-    const { elements, statements } = await loadStandards();
-
+    const std = await loadStandards();
+    const options = { std, autoMode, manualLevels, proposal };
     const courses = [];
     for (const file of files) {
       setStatus(`Processing ${file.name}…`);
       try {
-        const isDocx = /\.docx$/i.test(file.name);
-        const extracted = isDocx ? await processDocx(file) : await processPdf(file);
-
-        let levels, levelsReason;
-        if (autoMode) {
-          ({ levels, reason: levelsReason } = detectCourseLevels(extracted.firstPageForLevel, file.name));
-        } else {
-          levels = manualLevels;
-          levelsReason = "Manually set to: " + manualLevels.join(", ") + ".";
-        }
-
-        const missingElements = checkSyllabus(extracted.syllabusText, levels, elements);
-        const gradingCheck = checkGradingWeights(extracted.syllabusText);
-        const details = detailFindings(
-          checkItems(extracted.syllabusText, levels, elements, gradingCheck.status === "ok"),
-          compareStatements(extracted.syllabusText, levels, statements),
-          new Set(missingElements.map((m) => m.id))
-        );
-        const missingRequired = [...missingElements, ...details.missingItems, ...details.statementIssues];
-        const worthALook = details.worthALook;
-        const codeNote = checkPreciseCourseCode(extracted.firstPageForLevel);
-
-        let accessibilityFindings = [];
-        let accessibilityNote = null;
-        if (isDocx) {
-          accessibilityNote =
-            "Not available for .docx files — PDF/UA is a PDF-specific accessibility standard. Export to PDF to run this check.";
-        } else {
-          accessibilityFindings = await accessibilityCheck(extracted.pdf, extracted.buf, extracted.startPage);
-        }
-
-        courses.push({
-          label: courseLabel(file.name),
-          isDocx,
-          startPage: extracted.startPage,
-          totalPages: extracted.totalPages,
-          levelsReason,
-          missingRequired,
-          worthALook,
-          gradingCheck,
-          codeNote,
-          accessibilityFindings,
-          accessibilityNote,
-        });
+        courses.push(await analyzeFile(file, options));
       } catch (err) {
         console.error(err);
-        courses.push({ label: courseLabel(file.name), error: err.message });
+        courses.push({ label: courseLabel(file.name), fileName: file.name, error: err.message });
       }
     }
-
     lastCourses = courses;
     renderResults(courses);
     setStatus(`Done — checked ${courses.length} file(s).`);

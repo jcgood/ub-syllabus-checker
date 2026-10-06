@@ -161,13 +161,15 @@
       <fieldset>
         <legend>New-course proposal?</legend>
         <label style="display:block;">
-          <input type="checkbox" id="proposal-mode" aria-describedby="proposal-help">
+          <input type="checkbox" id="proposal-mode" aria-describedby="proposal-help" checked>
           Treat every file as a new-course proposal
         </label>
         <p id="proposal-help" style="margin: 0.3rem 0 0 1.6rem; color: var(--muted); font-size: 0.9rem;">
-          A proposal can't have a class number yet (one is assigned when a section is scheduled), and its
-          semester and meeting times may not be set, so those lines are not counted as missing. This is
-          turned on automatically for any file that includes the Graduate School's course approval form.
+          On by default, since this checker is used for course approvals. A proposal can't have a class
+          number yet (one is assigned when a section is scheduled), and its semester and meeting times may
+          not be set, so those lines are not counted as missing. Uncheck it to check a scheduled course's
+          syllabus; a file that includes the Graduate School's course approval form is still treated as a
+          proposal.
         </p>
       </fieldset>
 
@@ -204,15 +206,21 @@
       "Grading" heading can be found at all. A grading table that reconciles
       to 100% here also counts as positive evidence for the separate "Grading
       Policy" required-element check below, even when no specific phrase like
-      "course evaluation" or "grade breakdown" is present.</p>
-      <p><strong>Graduate syllabi are also checked line by line</strong> against the
-      Graduate School page's own list under each section (class number, delivery mode,
-      outcomes linked to the program, course-evaluation reminder, a specific generative-AI
-      statement, and so on). Lines the page marks "where applicable", or only says a section
-      "may include", are listed under "Worth a Look" rather than counted as missing. The
-      Academic Integrity and Accessibility Resources statements, which the Graduate School
-      says must be included word for word, are compared with the official text and reported
-      as matching, close (an older or edited version), or not found.</p>
+      "grade breakdown" or "grading scale" is present.</p>
+      <p><strong>Syllabi are also checked line by line</strong> against each policy
+      page's own list under each section (delivery mode, office hours, outcomes tied to
+      assignments, a grading scale, a specific generative-AI statement, and so on). Two
+      lines both pages only say "should" include are not checked: outcomes linked to the
+      program's curriculum map, and a reminder about course evaluations. Undergraduate syllabi are also checked for a weekly schedule that covers the
+      whole semester and for a pointer to the Academic Integrity policy. Lines the page
+      marks "where applicable", or only says a section "may include", are listed under
+      "Worth a Look" rather than counted as missing. Statements a page says must be
+      included word for word (graduate: Academic Integrity and Accessibility Resources;
+      undergraduate: Accessibility Resources) are compared with the official text and
+      reported as matching, close (an older or edited version), or not found. A course
+      listed at both levels is held to the undergraduate Accessibility Resources statement,
+      which contains everything in the graduate one; a syllabus using the graduate version
+      is told so.</p>
       <p><strong>"Grading Policy" and "Incomplete Policy" are two separate checks</strong>,
       not one — the two are governed by different, sometimes conflicting UB
       policies per level, and lumping them into a single pass/fail flag made
@@ -421,18 +429,22 @@ async function loadPdfPages(arrayBuffer) {
 // ALL-CAPS subject name ("HISTORY 484") -- found for real in a syllabus
 // this otherwise missed entirely.
 const COURSE_NUMBER_RE = /\b([A-Z]{2,15})\s?(\d{3})(?:\s*\/\s*(\d{3}))?\b/g;
+// Title case ("Bio 444/544") only with a dual listing (level_detection.DUAL_TITLE_CASE_RE).
+const DUAL_TITLE_CASE_RE = /\b([A-Z][a-z]{1,4})\s?(\d{3})\s*\/\s*(\d{3})\b/g;
 
 function detectCourseLevels(firstPageText, filename) {
   const candidateText = filename ? `${filename}\n${firstPageText}` : firstPageText;
-  const re = new RegExp(COURSE_NUMBER_RE.source, "g");
   const codes = [];
   const numbers = [];
-  let m;
-  while ((m = re.exec(candidateText)) !== null) {
-    const code = m[0].trim();
-    if (!codes.includes(code)) codes.push(code);
-    numbers.push(parseInt(m[2], 10));
-    if (m[3]) numbers.push(parseInt(m[3], 10));
+  for (const source of [COURSE_NUMBER_RE.source, DUAL_TITLE_CASE_RE.source]) {
+    const re = new RegExp(source, "g");
+    let m;
+    while ((m = re.exec(candidateText)) !== null) {
+      const code = m[0].trim();
+      if (!codes.includes(code)) codes.push(code);
+      numbers.push(parseInt(m[2], 10));
+      if (m[3]) numbers.push(parseInt(m[3], 10));
+    }
   }
   const hasUG = numbers.some((n) => n >= 100 && n <= 499);
   const hasGrad = numbers.some((n) => n >= 500);
@@ -502,8 +514,8 @@ function checkSyllabus(text, levels, elements) {
     if (!detected) {
       detected = (element.items || []).some(
         (item) =>
-          item.kind === "required" &&
           levels.some((l) => item.levels.includes(l)) &&
+          itemKind(item, levels) === "required" &&
           itemFound(item, text, gradingWeightsOk)
       );
     }
@@ -515,10 +527,19 @@ function checkSyllabus(text, levels, elements) {
 }
 
 // ---- Item-level and official-statement checks, ported from detail_check.py ----
-// See that module's docstring. Graduate only for now: only graduate
-// elements carry items, and standards.statements only has graduate entries.
+// See that module's docstring. Both levels: each item and statement says
+// which levels it applies to.
 const SHINGLE_WORDS = 5;
 const CLOSE_THRESHOLD = 0.5;
+const ITEM_KINDS = ["required", "if_applicable", "suggested", "manual"];
+
+// The strictest kind among the applicable levels (syllabus_standards.item_kind).
+function itemKind(item, levels) {
+  const overrides = item.level_kinds || {};
+  const kinds = levels.filter((l) => item.levels.includes(l)).map((l) => overrides[l] || item.kind);
+  if (!kinds.length) return item.kind;
+  return kinds.reduce((a, b) => (ITEM_KINDS.indexOf(b) < ITEM_KINDS.indexOf(a) ? b : a));
+}
 
 function itemFound(item, text, gradingWeightsOk) {
   if (
@@ -536,13 +557,14 @@ function checkItems(text, levels, elements, gradingWeightsOk) {
     if (applicableLevels(element, levels).length === 0) continue;
     for (const item of element.items || []) {
       if (!levels.some((l) => item.levels.includes(l))) continue;
-      const found = item.kind === "manual" ? null : itemFound(item, text, gradingWeightsOk);
+      const kind = itemKind(item, levels);
+      const found = kind === "manual" ? null : itemFound(item, text, gradingWeightsOk);
       results.push({
         elementId: element.id,
         elementTitle: element.title,
         itemId: item.id,
         label: item.label,
-        kind: item.kind,
+        kind,
         note: item.note,
         found,
       });
@@ -578,10 +600,23 @@ function compareStatement(official, text) {
   return { status: coverage >= CLOSE_THRESHOLD ? "close" : "not_found", coverage };
 }
 
+// The first applicable statement per element, in table order, so a combined
+// course is held to the undergraduate Accessibility text (statements_for_levels).
+function statementsForLevels(levels, statements) {
+  const chosen = {};
+  for (const s of statements || []) {
+    if (levels.includes(s.level) && !(s.element_id in chosen)) chosen[s.element_id] = s;
+  }
+  return chosen;
+}
+
 function compareStatements(text, levels, statements) {
-  return (statements || [])
-    .filter((s) => levels.includes(s.level))
-    .map((s) => ({ elementId: s.element_id, title: s.title, level: s.level, ...compareStatement(s.text, text) }));
+  return Object.values(statementsForLevels(levels, statements)).map((s) => ({
+    elementId: s.element_id,
+    title: s.title,
+    level: s.level,
+    ...compareStatement(s.text, text),
+  }));
 }
 
 // ---- Section-aware analysis, ported line for line from analysis.py ----
@@ -595,6 +630,9 @@ const CONTEXT_WORDS = 3;
 const SNIPPET_RADIUS = 50;
 const NUMBERING_RE = /^(?:[•▪●*-]\s*|\(?(?:\d{1,2}|[IVX]{1,4}|[A-Z])[.)]\s+)/;
 const ASYNC_RE = /\basynchronous\b/i;
+const SHORT_SESSION_RE = /\b(?:summer|winter)\s*,?\s+(?:session|term|20\d\d)\b/i;
+const TABLE_CELL_MAX_WORDS = 3;
+const TABLE_CELL_MIN_RUN = 3;
 const TITLE_SMALL_WORDS = new Set(["and", "of", "the", "for", "in", "on", "to", "a", "an", "or", "with"]);
 const STATUS_LABELS = {
   complete: "Complete",
@@ -687,9 +725,10 @@ function runInHeading(line, pattern) {
   const s = line.trim().replace(NUMBERING_RE, "");
   if (!s || !(s[0] >= "A" && s[0] <= "Z")) return null;
   // up to three leading words: "Use of generative AI: ...", "Required Readings. ..."
-  const m = new RegExp("^((?:[A-Za-z][\\w'-]*\\s+){0,3}?(?:" + pattern + ")[^:.]{0,30}?)\\s*([:.])\\s+\\S", "i").exec(s);
+  // also "Heading – Text" with a spaced en/em dash (run_in_heading)
+  const m = new RegExp("^((?:[A-Za-z][\\w'-]*\\s+){0,3}?(?:" + pattern + ")[^:.–—]{0,30}?)\\s*([:.]|[–—](?=\\s))\\s+\\S", "i").exec(s);
   if (!m || words(m[1]).length > 6) return null;
-  if (m[2] === ".") {
+  if (m[2] !== ":") {
     const isLower = (c) => c !== c.toUpperCase() && c === c.toLowerCase();
     if (words(m[1]).some((w) => isLower(w[0]) && !TITLE_SMALL_WORDS.has(w.toLowerCase()))) return null;
   }
@@ -698,17 +737,43 @@ function runInHeading(line, pattern) {
 
 function isGenericBoundary(shaped) {
   const letters = shaped.replace(/[^A-Za-z]/g, "");
-  return letters.length >= 3 && (letters.toUpperCase() === letters || shaped.endsWith(":"));
+  return letters.length >= 4 && (letters.toUpperCase() === letters || shaped.endsWith(":"));
+}
+
+// See analysis.py's table_cells: in a run of 3+ consecutive short heading-shaped
+// lines (a Word table row), every line but the first is a cell, not a heading.
+function tableCells(lines) {
+  const cells = new Set();
+  let run = [];
+  const flush = () => {
+    if (run.length >= TABLE_CELL_MIN_RUN) run.slice(1).forEach((i) => cells.add(i));
+    run = [];
+  };
+  lines.forEach(([, , , raw], idx) => {
+    const shaped = headingShape(raw);
+    if (shaped && words(shaped).length <= TABLE_CELL_MAX_WORDS) run.push(idx);
+    else flush();
+  });
+  flush();
+  return cells;
 }
 
 // Multi-word heading patterns rank by list order; every single-word
 // pattern shares one tier, so among those the earliest line wins.
 const headingTier = (pattern, rank) => (/\\s/.test(pattern) ? rank : 1000);
 
+// A section ends at the next line chosen as another element's heading, or
+// at a generic heading -- not at a line that merely resembles a heading
+// (analysis.find_sections).
 function findSections(lines, textLen, elementIds, std) {
   const lineHits = [];
-  const boundaries = [];
+  const generic = [];
+  const cells = tableCells(lines);
   lines.forEach(([, , , raw], idx) => {
+    if (cells.has(idx)) {
+      lineHits.push({});
+      return;
+    }
     const shaped = headingShape(raw);
     const head = shaped ? shaped.split(/:\s+(?=\S)/)[0] : null;
     const hits = {};
@@ -727,16 +792,21 @@ function findSections(lines, textLen, elementIds, std) {
       }
     }
     lineHits.push(hits);
-    if (Object.keys(hits).length || (shaped && isGenericBoundary(shaped))) boundaries.push(idx);
+    if (shaped && isGenericBoundary(shaped)) generic.push(idx);
   });
 
-  const sections = {};
+  const chosen = new Map();
   for (const elementId of elementIds) {
     let best = null;
     lineHits.forEach((hits, i) => {
       if (elementId in hits && (best === null || hits[elementId][0] < lineHits[best][elementId][0])) best = i;
     });
-    if (best === null) continue;
+    if (best !== null) chosen.set(elementId, best);
+  }
+  const boundaries = [...new Set([...generic, ...chosen.values()])].sort((a, b) => a - b);
+
+  const sections = {};
+  for (const [elementId, best] of chosen) {
     let end = textLen;
     for (const b of boundaries) {
       if (b > best && !(elementId in lineHits[b])) {
@@ -873,11 +943,15 @@ function compareStatementText(official, text) {
   const diffs = [];
   for (const [op, i0, i1, j0, j1] of runs) {
     if (op === "equal") continue;
-    const entry = { type: { delete: "missing", insert: "added", replace: "changed" }[op], official: "", yours: "", before: "", after: "" };
+    // span: the syllabus's own differing words (global offsets); analyzeSyllabus turns it into `where`
+    const entry = { type: { delete: "missing", insert: "added", replace: "changed" }[op], official: "", yours: "", before: "", after: "", span: null };
     if (i0 > 0) entry.before = official.slice(oToks[Math.max(0, i0 - CONTEXT_WORDS)][1], oToks[i0 - 1][2]);
     if (i1 < oToks.length) entry.after = official.slice(oToks[i1][1], oToks[Math.min(oToks.length, i1 + CONTEXT_WORDS) - 1][2]);
     if (i1 > i0) entry.official = official.slice(oToks[i0][1], oToks[i1 - 1][2]);
-    if (j1 > j0) entry.yours = text.slice(dToks[w0 + j0][1], dToks[w0 + j1 - 1][2]).replace(/\s+/g, " ");
+    if (j1 > j0) {
+      entry.yours = text.slice(dToks[w0 + j0][1], dToks[w0 + j1 - 1][2]).replace(/\s+/g, " ");
+      entry.span = [dToks[w0 + j0][1], dToks[w0 + j1 - 1][2]];
+    }
     diffs.push(entry);
   }
   return { status: "close", coverage, window: [dToks[w0][1], dToks[w1 - 1][2]], diffs: diffs.slice(0, MAX_DIFFS) };
@@ -894,8 +968,7 @@ function analyzeSyllabus(pages, levels, isProposal, pageOffset, std, paged = tru
   const elements = std.elements.filter((e) => applicableLevels(e, levels).length);
   const sections = findSections(lines, text.length, elements.map((e) => e.id), std);
   const gradingOk = checkGradingWeights(text).status === "ok";
-  const statements = {};
-  for (const s of std.statements) if (levels.includes(s.level)) statements[s.element_id] = s;
+  const statements = statementsForLevels(levels, std.statements);
 
   const ev = (start, end) => {
     const page = pageOf(start, pageStarts);
@@ -923,19 +996,28 @@ function analyzeSyllabus(pages, levels, isProposal, pageOffset, std, paged = tru
       if (!levels.some((l) => item.levels.includes(l))) continue;
       const details = std.item_details[item.id];
       const proposal = isProposal ? details.proposal || null : null;
-      const result = { id: item.id, label: item.label, kind: item.kind, status: null, where: null, evidence: null, why: "" };
-      if (item.kind === "manual") {
+      const kind = itemKind(item, levels);
+      const result = { id: item.id, label: item.label, kind, status: null, where: null, evidence: null, why: "" };
+      if (kind === "manual") {
         result.status = "check";
         result.why = item.note;
         itemResults.push(result);
         continue;
       }
+      const scope = details.scope;
+      if (scope === "section_only" && !section) {
+        result.status = "check";
+        result.why =
+          "Not checked: no heading for this section was found, and these words are too common elsewhere in a syllabus to search for. Confirm by hand.";
+        itemResults.push(result);
+        continue;
+      }
       let match = null;
-      if (section && details.scope === "section") {
+      if (section && (scope === "section" || scope === "section_only")) {
         match = firstMatch(text, section.start, section.end, item.detect, item.detect_cs);
         if (match) result.where = "section";
       }
-      if (match === null) {
+      if (match === null && scope !== "section_only") {
         match = firstMatch(text, 0, text.length, item.detect, item.detect_cs);
         if (match) result.where = section && details.scope === "section" ? "elsewhere" : "document";
       }
@@ -956,9 +1038,11 @@ function analyzeSyllabus(pages, levels, isProposal, pageOffset, std, paged = tru
       }
       const looked = details.looked_for;
       const searched =
-        section && details.scope === "section"
-          ? `Searched the "${section.heading}" section and the rest of the syllabus`
-          : "Searched the whole syllabus";
+        scope === "section_only"
+          ? `Searched the "${section.heading}" section`
+          : section && scope === "section"
+            ? `Searched the "${section.heading}" section and the rest of the syllabus`
+            : "Searched the whole syllabus";
       const asyncMatch = ASYNC_RE.exec(text);
       if (proposal === "not_applicable") {
         result.status = "not_applicable";
@@ -971,15 +1055,21 @@ function analyzeSyllabus(pages, levels, isProposal, pageOffset, std, paged = tru
         result.evidence = ev(asyncMatch.index, asyncMatch.index + asyncMatch[0].length);
         const page = result.evidence.page;
         result.why = "The syllabus describes the course as asynchronous" + (page ? ` (${page})` : "") + ", so it may have no meeting times.";
-      } else if (item.kind === "required") {
+      } else if (item.id === "schedule-full-term" && SHORT_SESSION_RE.exec(text)) {
+        const m = SHORT_SESSION_RE.exec(text);
+        result.status = "not_applicable";
+        result.evidence = ev(m.index, m.index + m[0].length);
+        const page = result.evidence.page;
+        result.why = "The syllabus mentions a summer or winter session" + (page ? ` (${page})` : "") + "; those schedules may be shorter than 15 weeks.";
+      } else if (kind === "required") {
         result.status = "missing";
         result.why = `Not found. Looked for ${looked}. ${searched}.`;
       } else {
         result.status = "worth_a_look";
         const qualifier =
-          item.kind === "if_applicable"
+          kind === "if_applicable"
             ? "only needed if it applies to this course"
-            : "the Graduate School page lists it as something this section may include";
+            : "the policy page lists it as something this section may include";
         result.why = `Not found (${qualifier}). Looked for ${looked}.`;
       }
       itemResults.push(result);
@@ -991,9 +1081,10 @@ function analyzeSyllabus(pages, levels, isProposal, pageOffset, std, paged = tru
       const cmp = compareStatementText(spec.text, text);
       statement = {
         title: spec.title,
+        source: spec.source,
         status: cmp.status,
         coverage: cmp.coverage,
-        diffs: cmp.diffs,
+        diffs: cmp.diffs.map(({ span, ...d }) => ({ ...d, where: span ? ev(span[0], span[1]) : null })),
         evidence: cmp.window ? ev(cmp.window[0], cmp.window[1]) : null,
         official_text: spec.text,
         red_flags: [],
@@ -1003,8 +1094,16 @@ function analyzeSyllabus(pages, levels, isProposal, pageOffset, std, paged = tru
       else if (cmp.window) region = [Math.max(0, cmp.window[0] - 400), Math.min(text.length, cmp.window[1] + 400)];
       if (region) {
         for (const flag of spec.red_flags || []) {
+          if ((flag.skip_if_levels || []).some((lvl) => levels.includes(lvl))) continue;
           const m = new RegExp(flag.pattern, "i").exec(text.slice(region[0], region[1]));
           if (m) statement.red_flags.push({ message: flag.message, evidence: ev(region[0] + m.index, region[0] + m.index + m[0].length) });
+        }
+      }
+      // a known other official version used word for word (variant_notes)
+      if (cmp.status !== "verbatim") {
+        for (const variant of spec.variant_notes || []) {
+          const vcmp = compareStatementText(variant.text, text);
+          if (vcmp.status === "verbatim") statement.red_flags.push({ message: variant.message, evidence: ev(vcmp.window[0], vcmp.window[1]) });
         }
       }
     }
@@ -1093,10 +1192,10 @@ function elementSummary(element, status, how, e, missingItems, statement, std) {
   }
   if (status === "wording") {
     if (statement.status === "not_found") {
-      return `${found}, but it does not use the required Graduate School wording (about ${pct(statement.coverage)}% of it appears).`;
+      return `${found}, but it does not use the wording required by ${statement.source} (about ${pct(statement.coverage)}% of it appears).`;
     }
     if (statement.status === "close") {
-      return `${found}, but the wording differs from the required Graduate School text (${pct(statement.coverage)}% matches).`;
+      return `${found}, but the wording differs from the text required by ${statement.source} (${pct(statement.coverage)}% matches).`;
     }
     return `${found}; uses the required wording, but see the note below.`;
   }
@@ -1357,7 +1456,7 @@ function unreadableMessage(c) {
 
 function proposalNote(c) {
   if (!c.result.is_proposal) return null;
-  const why = c.proposalDetected ? "the Graduate School approval form was found" : "you chose proposal mode";
+  const why = c.proposalDetected ? "the Graduate School approval form was found" : "proposal mode is on";
   return `Treated as a new-course proposal (${why}): class number is not applicable; semester and meeting times are left for a hand check.`;
 }
 
@@ -1545,13 +1644,39 @@ function courseDetailLines(c, e) {
 // Python parity test pins; this text is browser-only.
 const quoted = (s) => `"${s}"`;
 
+// Annotation tiers (2026-10-06, Jeff's design): every required section is
+// marked green (OK), yellow (PARTIAL) or red (MISSING) -- gray if
+// unreadable. Color is never the only signal (UB brand rule): every note
+// and comment starts with the word and symbol, the PDF puts the word in a
+// tag beside the section, and page 1 carries a legend. `fill` is the PDF
+// highlight tint (0-1 RGB); `hex` the same tint for Word shading; `author`
+// the Word comment author (Word colors comments by author, so each tier
+// gets its own color and can be filtered in the comment pane). Symbols
+// appear only in notes and comments; text drawn on PDF pages must be
+// WinAnsi, so tags and the summary page use the word alone.
+const TIERS = {
+  ok: { word: "OK", symbol: "✓", meaning: "checked and complete", fill: [0.84, 0.94, 0.8], hex: "D6F0CC" },
+  partial: { word: "PARTIAL", symbol: "◐", meaning: "present, but missing something or worded differently", fill: [1, 0.94, 0.66], hex: "FFF0A8" },
+  missing: { word: "MISSING", symbol: "✗", meaning: "not found", fill: [1, 0.8, 0.8], hex: "FFCCCC" },
+  unreadable: { word: "CAN'T READ", symbol: "?", meaning: "no readable text", fill: [0.88, 0.88, 0.88], hex: "E0E0E0" },
+};
+for (const t of Object.values(TIERS)) t.author = `Syllabus checker ${t.symbol} ${t.word}`;
+const TIER_OF_STATUS = { complete: "ok", incomplete: "partial", wording: "partial", missing: "missing", unreadable: "unreadable" };
+const tierOf = (e) => TIERS[TIER_OF_STATUS[e.status]];
+// The syllabus's own differing words inside a "wording differs" statement.
+const DIFF_WORD_FILL = [1, 0.6, 0.6];
+const DIFF_WORD_HEX = "FF9999";
+
 function noteHeadline(e) {
   const st = e.statement;
-  if (e.status === "missing") return `${e.title}: required section not found`;
-  if (e.status === "incomplete") return `${e.title}: some required items are missing`;
-  if (e.status === "wording" && st && st.status === "verbatim") return `${e.title}: uses the required wording, but see below`;
-  if (e.status === "wording") return `${e.title}: wording differs from the required statement`;
-  return `${e.title}: ${STATUS_LABELS[e.status]}`;
+  const t = tierOf(e);
+  const tag = `${t.symbol} ${t.word}: `;
+  if (e.status === "missing") return `${tag}${e.title}: required section not found`;
+  if (e.status === "incomplete") return `${tag}${e.title}: some required items are missing`;
+  if (e.status === "wording" && st && st.status === "verbatim") return `${tag}${e.title}: uses the required wording, but see below`;
+  if (e.status === "wording") return `${tag}${e.title}: wording differs from the required statement`;
+  if (e.status === "complete") return `${tag}${e.title}: checked and complete`;
+  return `${tag}${e.title}: ${STATUS_LABELS[e.status]}`;
 }
 
 function addSectionAdvice(e) {
@@ -1569,6 +1694,7 @@ function noteDiffLine(d) {
 function annotationLines(c, e) {
   const lines = [noteHeadline(e)];
   if (e.status === "missing") lines.push(addSectionAdvice(e));
+  if (e.status === "complete") lines.push(e.summary);
 
   const missingItems = e.items.filter((r) => r.status === "missing");
   if (missingItems.length) {
@@ -1582,10 +1708,12 @@ function annotationLines(c, e) {
   const st = e.statement;
   if (st && st.status !== "verbatim") {
     lines.push("");
+    if (st.diffs.some((d) => d.where)) lines.push("The words that differ are highlighted in darker red.");
+    const requirer = st.source.charAt(0).toUpperCase() + st.source.slice(1);
     if (st.status === "not_found") {
-      lines.push("The Graduate School requires this statement word for word, and this section uses different wording. Please use the required text:");
+      lines.push(`${requirer} requires this statement word for word, and this section uses different wording. Please use the required text:`);
     } else {
-      lines.push(`The Graduate School requires this statement word for word. This version is close (${Math.floor(st.coverage * 100 + 0.5)}% matches) but differs:`);
+      lines.push(`${requirer} requires this statement word for word. This version is close (${Math.floor(st.coverage * 100 + 0.5)}% matches) but differs:`);
       for (const d of st.diffs) lines.push(noteDiffLine(d));
       lines.push("", "Simplest fix: replace it with the required text:");
     }
@@ -1622,29 +1750,47 @@ function noteCountsText(result) {
 
 // One note listing the required sections with nothing to anchor a note to.
 function unanchoredLines(sections) {
-  const lines = ["Required sections not found anywhere in this syllabus:"];
+  const lines = [`${TIERS.missing.symbol} ${TIERS.missing.word}: required sections not found anywhere in this syllabus:`];
   for (const e of sections) lines.push("", `- ${e.title}. ${addSectionAdvice(e)}`);
   return lines;
 }
 
-function sectionsNeedingAttention(result) {
-  return result.elements.filter((e) => e.required && !["complete", "unreadable"].includes(e.status));
+// Which UB syllabus guidelines a run was checked against, by level.
+function guidelinesName(levels) {
+  const names = [];
+  if (levels.includes("undergraduate")) names.push("undergraduate syllabus guidelines (Creating a Syllabus)");
+  if (levels.includes("graduate")) names.push("Graduate Course Syllabus Guidelines");
+  return "UB's " + names.join(" and ");
 }
 
-function summaryLines(c) {
+// The summary as rows: { text, fill } where fill is a tier's tint (or null).
+// symbols=false for text drawn on a PDF page (WinAnsi only); the word
+// (OK / PARTIAL / MISSING) carries the status either way.
+function summaryRows(c, symbols = true) {
   const r = c.result;
-  const lines = [`Automated syllabus screen: ${c.label}`, `Checked ${new Date().toLocaleDateString()} against UB's Graduate Course Syllabus Guidelines. Heuristic only; confirm each note against the document.`];
+  const sym = (t) => (symbols ? t.symbol + " " : "");
+  const rows = [`Automated syllabus screen: ${c.label}`, `Checked ${new Date().toLocaleDateString()} against ${guidelinesName(r.levels)}. Heuristic only; confirm each note against the document.`].map((text) => ({ text, fill: null }));
   const pn = proposalNote(c);
-  if (pn) lines.push(pn);
+  if (pn) rows.push({ text: pn, fill: null });
   if (r.readability.status === "unreadable") {
-    lines.push("Can't read this syllabus: " + unreadableMessage(c));
-    return lines;
+    rows.push({ text: "Can't read this syllabus: " + unreadableMessage(c), fill: TIERS.unreadable.fill });
+    return rows;
   }
-  lines.push(`Required sections: ${statusCountsText(r)}.`);
-  for (const e of r.elements.filter((x) => x.required)) lines.push(`${STATUS_LABELS[e.status]}: ${e.title}. ${e.summary}`);
-  lines.push(NOT_CHECKED_NOTE);
-  return lines;
+  rows.push({ text: `Required sections: ${statusCountsText(r)}.`, fill: null });
+  rows.push({ text: "Key:", fill: null });
+  for (const k of ["ok", "partial", "missing"]) {
+    const t = TIERS[k];
+    rows.push({ text: `${sym(t)}${t.word} (${{ ok: "green", partial: "yellow", missing: "red" }[k]}): ${t.meaning}.`, fill: t.fill });
+  }
+  for (const e of r.elements.filter((x) => x.required)) {
+    const t = tierOf(e);
+    rows.push({ text: `${sym(t)}${t.word}: ${e.title}. ${e.summary}`, fill: t.fill });
+  }
+  rows.push({ text: NOT_CHECKED_NOTE, fill: null });
+  return rows;
 }
+
+const summaryLines = (c) => summaryRows(c).map((row) => row.text);
 
 // ---- Annotated PDF (pdf-lib) ----
 // Text drawn with pdf-lib's standard fonts must be WinAnsi; replace anything else.
@@ -1675,17 +1821,23 @@ function wrapText(text, font, size, maxWidth) {
 }
 
 // Rectangles (one per text line) covering page-text offsets [start, end).
+// A text item is often a whole line, so the part of it inside the range is
+// estimated by character position (proportional fonts make this slightly
+// approximate) -- otherwise one differing word lights up its whole line.
 function rectsForRange(spans, start, end) {
   const hit = spans.filter((s) => s.end > start && s.start < end);
   const rows = [];
   for (const s of hit) {
+    const n = Math.max(1, s.end - s.start);
+    const x0 = s.x + (s.w * (Math.max(start, s.start) - s.start)) / n;
+    const x1 = s.x + (s.w * (Math.min(end, s.end) - s.start)) / n;
     const row = rows.find((r) => Math.abs(r.y - s.y) < s.h * 0.5);
     if (row) {
-      row.x0 = Math.min(row.x0, s.x);
-      row.x1 = Math.max(row.x1, s.x + s.w);
+      row.x0 = Math.min(row.x0, x0);
+      row.x1 = Math.max(row.x1, x1);
       row.h = Math.max(row.h, s.h);
     } else {
-      rows.push({ x0: s.x, x1: s.x + s.w, y: s.y, h: s.h });
+      rows.push({ x0, x1, y: s.y, h: s.h });
     }
   }
   return rows;
@@ -1693,21 +1845,20 @@ function rectsForRange(spans, start, end) {
 
 // Note colors. PDF viewers (Acrobat, Preview) use a note's color as its
 // pop-up background too, so these are light tints that keep black text
-// readable; the headline wording, not the color, carries the status.
+// readable; the headline wording, not the color, carries the status. A
+// section's note uses its tier's tint (TIERS); info is for the page-1 note.
 const NOTE_COLORS = {
-  missing: [1, 0.8, 0.8], // light red
-  attention: [1, 0.9, 0.72], // light orange
   info: [0.82, 0.9, 1], // light blue
 };
 
-function addPdfNote(doc, page, x, y, lines, color) {
+function addPdfNote(doc, page, x, y, lines, color, author = "Syllabus checker") {
   const { PDFHexString, PDFString } = PDFLib;
   const annot = doc.context.obj({
     Type: "Annot",
     Subtype: "Text",
     Rect: [x, y, x + 18, y + 18],
     Contents: PDFHexString.fromText(lines.join("\n")),
-    T: PDFHexString.fromText("Syllabus checker"),
+    T: PDFHexString.fromText(author),
     Name: "Comment",
     C: color,
     F: 4,
@@ -1724,10 +1875,28 @@ async function buildAnnotatedPdf(c) {
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
   const original = doc.getPages();
 
-  // Notes on the syllabus pages.
-  const needing = sectionsNeedingAttention(c.result);
+  const highlight = (page, rc, fill, opacity) =>
+    page.drawRectangle({ x: rc.x0 - 1, y: rc.y - rc.h * 0.25, width: rc.x1 - rc.x0 + 2, height: rc.h * 1.2, color: rgb(...fill), opacity });
+  // A small word tag ("OK" / "PARTIAL" / "MISSING") level with each section,
+  // so the status reads without color. Always in the right page margin: a
+  // match can end mid-line, and a tag placed after it would cover the rest
+  // of the line (found on a real syllabus, 2026-10-06). The tags also form
+  // a status column.
+  const TAG_SIZE = 6.5;
+  const drawTag = (page, top, t) => {
+    const tw = bold.widthOfTextAtSize(t.word, TAG_SIZE);
+    const x = page.getWidth() - tw - 10;
+    page.drawRectangle({ x, y: top.y - 1.5, width: tw + 4, height: TAG_SIZE + 3, color: rgb(...t.fill), borderColor: rgb(0.35, 0.35, 0.35), borderWidth: 0.5 });
+    page.drawText(winAnsi(t.word), { x: x + 2, y: top.y + 0.5, size: TAG_SIZE, font: bold, color: rgb(0.1, 0.1, 0.1) });
+  };
+  const rectsFor = (pageIndex, offset, length) => rectsForRange((c.spans && c.spans[pageIndex]) || [], offset, offset + length);
+
+  // Every required section gets its tier's highlight, tag and note; a
+  // missing section has nothing on the page to mark, so those are listed in
+  // one note at the top of the first syllabus page.
   const unanchored = [];
-  for (const e of needing) {
+  for (const e of c.result.elements.filter((x) => x.required && x.status !== "unreadable")) {
+    const t = tierOf(e);
     const anchor = e.heading || e.evidence;
     if (!anchor) {
       unanchored.push(e);
@@ -1735,23 +1904,26 @@ async function buildAnnotatedPdf(c) {
     }
     const pageIndex = c.startPage + anchor.page_index;
     const page = original[pageIndex];
-    const spans = (c.spans && c.spans[pageIndex]) || [];
     const length = e.heading ? Math.max(anchor.length, 1) : Math.min(Math.max(anchor.length, 1), 200);
-    const rects = rectsForRange(spans, anchor.offset, anchor.offset + length);
-    const color = e.status === "missing" ? NOTE_COLORS.missing : NOTE_COLORS.attention;
+    const rects = rectsFor(pageIndex, anchor.offset, length);
     if (rects.length) {
-      for (const rc of rects) {
-        page.drawRectangle({ x: rc.x0 - 1, y: rc.y - rc.h * 0.25, width: rc.x1 - rc.x0 + 2, height: rc.h * 1.2, color: rgb(1, 0.85, 0.2), opacity: 0.35 });
-      }
+      for (const rc of rects) highlight(page, rc, t.fill, 0.55);
       const top = rects[0];
-      addPdfNote(doc, page, Math.max(2, Math.min(top.x0 - 22, page.getWidth() - 22)), top.y - 2, annotationLines(c, e), color);
+      drawTag(page, top, t);
+      addPdfNote(doc, page, Math.max(2, Math.min(top.x0 - 22, page.getWidth() - 22)), top.y - 2, annotationLines(c, e), t.fill, t.author);
     } else {
-      addPdfNote(doc, page, 4, page.getHeight() - 26, annotationLines(c, e), color);
+      addPdfNote(doc, page, 4, page.getHeight() - 26, annotationLines(c, e), t.fill, t.author);
+    }
+    // The syllabus's own differing words in a mandated statement, darker.
+    for (const d of (e.statement && e.statement.diffs) || []) {
+      if (!d.where) continue;
+      const pi = c.startPage + d.where.page_index;
+      for (const rc of rectsFor(pi, d.where.offset, Math.max(d.where.length, 1))) highlight(original[pi], rc, DIFF_WORD_FILL, 0.6);
     }
   }
   const firstSyllabus = original[Math.min(c.startPage, original.length - 1)];
   if (unanchored.length && firstSyllabus) {
-    addPdfNote(doc, firstSyllabus, 4, firstSyllabus.getHeight() - 48, unanchoredLines(unanchored), NOTE_COLORS.missing);
+    addPdfNote(doc, firstSyllabus, 4, firstSyllabus.getHeight() - 48, unanchoredLines(unanchored), TIERS.missing.fill, TIERS.missing.author);
   }
 
   // Summary page(s) at the END, so every page number in the notes still
@@ -1760,7 +1932,9 @@ async function buildAnnotatedPdf(c) {
   addPdfNote(doc, original[0], 4, original[0].getHeight() - 26,
     [
       `Syllabus checker results for the required sections: ${noteCountsText(c.result) || "see the summary"}.`,
-      "Each section that needs attention is highlighted and has a note like this one beside it.",
+      "Every required section is highlighted and tagged, with a note like this one beside it:",
+      ...["ok", "partial", "missing"].map((k) => `${TIERS[k].symbol} ${TIERS[k].word} (${{ ok: "green", partial: "yellow", missing: "red" }[k]}): ${TIERS[k].meaning}.`),
+      "Missing sections are listed in a red note at the top of the first syllabus page. In a statement whose wording differs, the differing words are highlighted in darker red.",
       `A full summary is on page ${summaryPageNumber}, added at the end. Page numbers in the notes refer to this file's original pages.`,
     ],
     NOTE_COLORS.info);
@@ -1780,10 +1954,25 @@ async function buildAnnotatedPdf(c) {
     }
     y -= gap;
   };
-  const lines = summaryLines(c);
+  // A row with a tinted background (a tier's tint), text unchanged.
+  const writeRow = (text, f, size, fill, gap = 4) => {
+    const wrapped = wrapText(text, f, size, w - 2 * margin - 8);
+    const blockH = wrapped.length * (size + 3) + 4;
+    if (y - blockH < margin) newPage();
+    page.drawRectangle({ x: margin - 4, y: y - blockH, width: w - 2 * margin + 8, height: blockH, color: rgb(...fill) });
+    y -= 2;
+    for (const line of wrapped) {
+      page.drawText(line, { x: margin, y: y - size, size, font: f, color: rgb(0.1, 0.1, 0.1) });
+      y -= size + 3;
+    }
+    y -= 2 + gap;
+  };
   write("Syllabus review summary (added by the UB Syllabus Compliance Checker)", bold, 14, 8);
-  lines.forEach((line, i) => write(line, i === 0 ? bold : font, i === 0 ? 11 : 9.5));
-  write("Notes: each section that needs attention is highlighted on its page, with a note icon beside it; open the note for details.", font, 9.5);
+  summaryRows(c, false).forEach((row, i) => {
+    if (row.fill) writeRow(row.text, font, 9.5, row.fill, 3);
+    else write(row.text, i === 0 ? bold : font, i === 0 ? 11 : 9.5);
+  });
+  write("Notes: every required section is highlighted and tagged on its page, with a note icon beside it; open the note for details.", font, 9.5);
   return doc.save();
 }
 
@@ -1833,6 +2022,94 @@ function wEl(doc, name, attrs = {}) {
   return node;
 }
 
+// Word rejects properties out of schema order, so shading goes before the
+// first of these siblings (ECMA-376 CT_PPrBase / CT_RPr order).
+const PPR_AFTER_SHD = ["tabs", "suppressAutoHyphens", "kinsoku", "wordWrap", "overflowPunct", "topLinePunct",
+  "autoSpaceDE", "autoSpaceDN", "bidi", "adjustRightInd", "snapToGrid", "spacing", "ind", "contextualSpacing",
+  "mirrorIndents", "suppressOverlap", "jc", "textDirection", "textAlignment", "textboxTightWrap", "outlineLvl",
+  "divId", "cnfStyle", "rPr", "sectPr", "pPrChange"];
+const RPR_AFTER_SHD = ["fitText", "vertAlign", "rtl", "cs", "em", "lang", "eastAsianLayout", "specVanish", "oMath", "rPrChange"];
+
+const wChild = (el, name) => Array.from(el.childNodes).find((n) => n.namespaceURI === W_NS && n.localName === name);
+
+// Set <w:shd> on a pPr/rPr element, replacing any existing shading.
+function setShading(doc, props, hex, afterNames) {
+  const old = wChild(props, "shd");
+  if (old) props.removeChild(old);
+  const shd = wEl(doc, "shd", { val: "clear", color: "auto", fill: hex });
+  const before = Array.from(props.childNodes).find((n) => n.namespaceURI === W_NS && afterNames.includes(n.localName));
+  props.insertBefore(shd, before || null);
+}
+
+function shadeParagraph(doc, p, hex) {
+  let pPr = wChild(p, "pPr");
+  if (!pPr) {
+    pPr = wEl(doc, "pPr");
+    p.insertBefore(pPr, p.firstChild);
+  }
+  setShading(doc, pPr, hex, PPR_AFTER_SHD);
+}
+
+// Shade characters [start, end) of paragraph p (offsets as docxParagraphs
+// counts them: a <w:t>'s text, 1 for a tab or break). Each <w:t> touched is
+// split out into its own run (same formatting) so only those characters are
+// shaded. Text nodes outside plain <w:r> runs are left alone.
+function shadeCharacters(doc, p, start, end, hex) {
+  const pieces = [];
+  let pos = 0;
+  for (const node of p.getElementsByTagNameNS(W_NS, "*")) {
+    const name = node.localName;
+    if (name !== "t" && name !== "tab" && name !== "br" && name !== "cr") continue;
+    let owner = node.parentNode;
+    while (owner && !(owner.namespaceURI === W_NS && owner.localName === "p")) owner = owner.parentNode;
+    if (owner !== p) continue;
+    const len = name === "t" ? node.textContent.length : 1;
+    if (name === "t" && pos + len > start && pos < end) {
+      pieces.push({ t: node, s: Math.max(0, start - pos), e: Math.min(len, end - pos) });
+    }
+    pos += len;
+  }
+  for (const { t, s, e } of pieces) {
+    const run = t.parentNode;
+    if (!run || run.namespaceURI !== W_NS || run.localName !== "r") continue;
+    const text = t.textContent;
+    const rPr = wChild(run, "rPr");
+    const makeRun = (str) => {
+      const r = wEl(doc, "r");
+      if (rPr) r.appendChild(rPr.cloneNode(true));
+      const nt = wEl(doc, "t");
+      nt.setAttribute("xml:space", "preserve");
+      nt.textContent = str;
+      r.appendChild(nt);
+      return r;
+    };
+    // before: the run's own earlier children plus the text before s
+    const kids = Array.from(run.childNodes).filter((n) => n !== rPr);
+    const idx = kids.indexOf(t);
+    const before = wEl(doc, "r");
+    if (rPr) before.appendChild(rPr.cloneNode(true));
+    for (const k of kids.slice(0, idx)) before.appendChild(k);
+    if (s > 0) before.appendChild(makeRun(text.slice(0, s)).lastChild);
+    const mid = makeRun(text.slice(s, e));
+    let midPr = wChild(mid, "rPr");
+    if (!midPr) {
+      midPr = wEl(doc, "rPr");
+      mid.insertBefore(midPr, mid.firstChild);
+    }
+    setShading(doc, midPr, hex, RPR_AFTER_SHD);
+    const after = wEl(doc, "r");
+    if (rPr) after.appendChild(rPr.cloneNode(true));
+    if (e < text.length) after.appendChild(makeRun(text.slice(e)).lastChild);
+    for (const k of kids.slice(idx + 1)) after.appendChild(k);
+    const parent = run.parentNode;
+    const hasContent = (r) => Array.from(r.childNodes).some((n) => !(n.namespaceURI === W_NS && n.localName === "rPr"));
+    if (hasContent(before)) parent.insertBefore(before, run);
+    parent.insertBefore(mid, run);
+    if (hasContent(after)) parent.insertBefore(after, run);
+    parent.removeChild(run);
+  }
+}
+
 async function buildAnnotatedDocx(c) {
   const JSZip = getJSZip();
   const zip = await JSZip.loadAsync(c.docxBuf.slice(0));
@@ -1855,11 +2132,11 @@ async function buildAnnotatedDocx(c) {
   }
   const date = new Date().toISOString().replace(/\.\d+Z$/, "Z");
 
-  const addComment = (paraIndex, lines) => {
+  const addComment = (paraIndex, lines, author = "Syllabus checker") => {
     const target = paragraphs[Math.max(0, Math.min(paraIndex, paragraphs.length - 1))];
     if (!target) return;
     const id = String(nextId++);
-    const comment = wEl(commentsXml, "comment", { id, author: "Syllabus checker", date, initials: "SC" });
+    const comment = wEl(commentsXml, "comment", { id, author, date, initials: "SC" });
     for (const line of lines) {
       const p = wEl(commentsXml, "p");
       const r = wEl(commentsXml, "r");
@@ -1887,15 +2164,34 @@ async function buildAnnotatedDocx(c) {
     return i === -1 ? 0 : i;
   };
 
+  // Differing words first (shading only restructures runs; text, and so
+  // every offset, is unchanged), then section shading and comments. Each
+  // tier's comments come from its own author, so Word gives each tier its
+  // own color and the comment pane can be filtered by it.
+  const required = c.result.elements.filter((x) => x.required && x.status !== "unreadable");
+  for (const e of required) {
+    for (const d of (e.statement && e.statement.diffs) || []) {
+      if (!d.where) continue;
+      const i = paraAt(d.where.offset);
+      const para = paragraphs[i];
+      if (para) shadeCharacters(docXml, para.el, d.where.offset - para.start, d.where.offset - para.start + d.where.length, DIFF_WORD_HEX);
+    }
+  }
   addComment(0, summaryLines(c));
   const unanchored = [];
-  for (const e of sectionsNeedingAttention(c.result)) {
+  for (const e of required) {
+    const t = tierOf(e);
     const anchor = e.heading || e.evidence;
-    if (!anchor) unanchored.push(e);
-    else addComment(paraAt(anchor.offset), annotationLines(c, e));
+    if (!anchor) {
+      unanchored.push(e);
+      continue;
+    }
+    const i = paraAt(anchor.offset);
+    if (paragraphs[i]) shadeParagraph(docXml, paragraphs[i].el, t.hex);
+    addComment(i, annotationLines(c, e), t.author);
   }
   if (unanchored.length) {
-    addComment(0, unanchoredLines(unanchored));
+    addComment(0, unanchoredLines(unanchored), TIERS.missing.author);
   }
 
   zip.file("word/document.xml", XML_DECL + serializer.serializeToString(docXml).replace(/^<\?xml[^>]*\?>\s*/, ""));
@@ -1942,7 +2238,9 @@ async function downloadAnnotated(c) {
 async function buildDocx(courses) {
   const children = [];
   const para = (text, opts = {}) => new Paragraph({ children: [new TextRun({ text, ...opts })] });
-  children.push(new Paragraph({ text: "Graduate Syllabus Review", heading: HeadingLevel.TITLE, alignment: AlignmentType.CENTER }));
+  const allLevels = [...new Set(courses.flatMap((c) => (c.result && c.result.levels) || []))];
+  const reportTitle = allLevels.length === 1 && allLevels[0] === "graduate" ? "Graduate Syllabus Review" : "Syllabus Review";
+  children.push(new Paragraph({ text: reportTitle, heading: HeadingLevel.TITLE, alignment: AlignmentType.CENTER }));
   children.push(
     new Paragraph({
       alignment: AlignmentType.CENTER,
@@ -1951,7 +2249,8 @@ async function buildDocx(courses) {
   );
   children.push(
     para(
-      "Scope: syllabus content only, checked against UB's Graduate Course Syllabus Guidelines. Each PDF's “New Graduate Course Approval Request Form” cover pages, and any printed emails after them, are excluded. Each required section is marked Complete, Incomplete (present but missing specific lines), Wording differs (a mandated statement isn't the required text), Missing, or Can't read (no readable text). This browser-based tool's accessibility screen is DEGRADED (no full PDF/UA-1 validation). Confirm findings against the actual document before acting on them."
+      `Scope: syllabus content only, checked against ${allLevels.length ? guidelinesName(allLevels) : "UB's syllabus guidelines"}, according to each course's level. Any “New Graduate Course Approval Request Form” cover pages, and any printed emails after them, are excluded.` +
+      " Each required section is marked Complete, Incomplete (present but missing specific lines), Wording differs (a mandated statement isn't the required text), Missing, or Can't read (no readable text). This browser-based tool's accessibility screen is DEGRADED (no full PDF/UA-1 validation). Confirm findings against the actual document before acting on them."
     )
   );
   children.push(para(NOT_CHECKED_NOTE));

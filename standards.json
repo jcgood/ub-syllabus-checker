@@ -26,20 +26,24 @@
           "id": "subject-code-number",
           "label": "Course subject code and number (e.g. ANA 599)",
           "levels": [
+            "undergraduate",
             "graduate"
           ],
           "kind": "required",
           "detect": [],
           "detect_cs": [
             "\\b[A-Z]{2,}\\s?\\d{3}",
-            "\\b[A-Z]{2,5}\\s?XXX\\b"
+            "\\b[A-Z]{2,5}\\s?XXX\\b",
+            "\\b[A-Z][a-z]{1,4}\\s?\\d{3}\\s*/\\s*\\d{3}\\b"
           ],
-          "note": ""
+          "note": "",
+          "level_kinds": {}
         },
         {
           "id": "instruction-type",
           "label": "Type of instruction (LEC, SEM, TUT, etc.)",
           "levels": [
+            "undergraduate",
             "graduate"
           ],
           "kind": "required",
@@ -51,23 +55,27 @@
             "\\b(?:LEC|SEM|TUT|LAB|LLB|LR|REC|DIS|STU|SUP|IND|CLN|FLD|PRA)\\b",
             "\\b(?:LECTURE|SEMINAR|TUTORIAL|LABORATORY)\\b"
           ],
-          "note": ""
+          "note": "",
+          "level_kinds": {}
         },
         {
           "id": "course-title",
           "label": "Course title",
           "levels": [
+            "undergraduate",
             "graduate"
           ],
           "kind": "manual",
           "detect": [],
           "detect_cs": [],
-          "note": ""
+          "note": "",
+          "level_kinds": {}
         },
         {
           "id": "class-number",
           "label": "Class number (the 5-digit registration number, e.g. 12345)",
           "levels": [
+            "undergraduate",
             "graduate"
           ],
           "kind": "required",
@@ -77,21 +85,24 @@
             "\\bclass\\s*:\\s*\\d{5}\\b"
           ],
           "detect_cs": [],
-          "note": ""
+          "note": "",
+          "level_kinds": {}
         },
         {
           "id": "semester",
           "label": "Semester (e.g. Fall 2026)",
           "levels": [
+            "undergraduate",
             "graduate"
           ],
           "kind": "required",
           "detect": [
-            "\\b(?:fall|spring|summer|winter)\\s+(?:semester\\s+|term\\s+|session\\s+)?(?:of\\s+)?(?:20\\d\\d|'\\d\\d)\\b",
+            "\\b(?:fall|spring|summer|winter),?\\s+(?:semester\\s+|term\\s+|session\\s+)?(?:of\\s+)?(?:20\\d\\d|'\\d\\d)\\b",
             "\\b20\\d\\d\\s+(?:fall|spring|summer|winter)\\b"
           ],
           "detect_cs": [],
-          "note": ""
+          "note": "",
+          "level_kinds": {}
         }
       ]
     },
@@ -118,6 +129,7 @@
           "id": "meeting-times",
           "label": "Meeting date(s) and time(s)",
           "levels": [
+            "undergraduate",
             "graduate"
           ],
           "kind": "required",
@@ -128,12 +140,14 @@
             "class\\s+meets"
           ],
           "detect_cs": [],
-          "note": "A fully asynchronous online course may legitimately have no meeting times."
+          "note": "A fully asynchronous online course may legitimately have no meeting times.",
+          "level_kinds": {}
         },
         {
           "id": "delivery-mode",
           "label": "Delivery mode (hybrid, online, traditional, etc.)",
           "levels": [
+            "undergraduate",
             "graduate"
           ],
           "kind": "required",
@@ -150,12 +164,14 @@
             "\\bremote(?:ly)? (?:instruction|course|class)"
           ],
           "detect_cs": [],
-          "note": ""
+          "note": "",
+          "level_kinds": {}
         },
         {
           "id": "credits",
           "label": "Number of credits (including ranges, if any)",
           "levels": [
+            "undergraduate",
             "graduate"
           ],
           "kind": "required",
@@ -165,12 +181,14 @@
             "credit hours?"
           ],
           "detect_cs": [],
-          "note": ""
+          "note": "",
+          "level_kinds": {}
         },
         {
           "id": "instructor-contact",
           "label": "Instructor name and contact information (an email address)",
           "levels": [
+            "undergraduate",
             "graduate"
           ],
           "kind": "required",
@@ -178,27 +196,34 @@
             "[\\w.+-]+@[\\w-]+(?:\\.[\\w-]+)+"
           ],
           "detect_cs": [],
-          "note": ""
+          "note": "",
+          "level_kinds": {}
         },
         {
           "id": "office-hours",
           "label": "Office hours",
           "levels": [
+            "undergraduate",
             "graduate"
           ],
           "kind": "if_applicable",
           "detect": [
             "office\\s*hours?",
+            "office\\s+location\\s*(?:&|and)\\s*hours",
             "student hours",
             "by appointment"
           ],
           "detect_cs": [],
-          "note": ""
+          "note": "",
+          "level_kinds": {
+            "undergraduate": "required"
+          }
         },
         {
           "id": "other-persons",
           "label": "Other relevant persons (e.g. TAs) and their contact/office hours",
           "levels": [
+            "undergraduate",
             "graduate"
           ],
           "kind": "if_applicable",
@@ -211,7 +236,8 @@
             "\\bTAs?\\b",
             "\\bGAs?\\b"
           ],
-          "note": ""
+          "note": "",
+          "level_kinds": {}
         }
       ]
     },
@@ -238,17 +264,20 @@
           "id": "official-description",
           "label": "Description matches the official (Catalog) course description",
           "levels": [
+            "undergraduate",
             "graduate"
           ],
           "kind": "manual",
           "detect": [],
           "detect_cs": [],
-          "note": "Compare by hand with the Graduate Catalog entry for this course."
+          "note": "Compare by hand with this course's entry in the Undergraduate or Graduate Catalog.",
+          "level_kinds": {}
         },
         {
           "id": "prerequisites",
           "label": "Prerequisites / expected prior knowledge",
           "levels": [
+            "undergraduate",
             "graduate"
           ],
           "kind": "if_applicable",
@@ -259,7 +288,8 @@
             "expected (?:background|preparation)"
           ],
           "detect_cs": [],
-          "note": ""
+          "note": "",
+          "level_kinds": {}
         }
       ]
     },
@@ -286,6 +316,7 @@
           "id": "materials-location",
           "label": "Where to find course materials (library reserve, Brightspace, etc.)",
           "levels": [
+            "undergraduate",
             "graduate"
           ],
           "kind": "if_applicable",
@@ -300,7 +331,8 @@
             "\\bbookstore\\b"
           ],
           "detect_cs": [],
-          "note": ""
+          "note": "",
+          "level_kinds": {}
         }
       ]
     },
@@ -332,6 +364,7 @@
           "id": "outcomes-student-focused",
           "label": "Outcomes say what students will know or be able to do",
           "levels": [
+            "undergraduate",
             "graduate"
           ],
           "kind": "suggested",
@@ -342,23 +375,8 @@
             "upon (?:successful )?completion"
           ],
           "detect_cs": [],
-          "note": "Phrasing check only; a bare bulleted list of verbs ('Analyze...') won't match."
-        },
-        {
-          "id": "outcomes-program-link",
-          "label": "Outcomes linked to the program's learning outcomes / curriculum map",
-          "levels": [
-            "graduate"
-          ],
-          "kind": "required",
-          "detect": [
-            "program(?:-level)?\\s+(?:learning\\s+)?(?:outcomes?|goals|objectives)",
-            "curriculum map",
-            "degree program",
-            "program'?s?\\s+(?:learning\\s+)?(?:outcomes?|goals)"
-          ],
-          "detect_cs": [],
-          "note": ""
+          "note": "Phrasing check only; a bare bulleted list of verbs ('Analyze...') won't match.",
+          "level_kinds": {}
         }
       ]
     },
@@ -385,6 +403,7 @@
           "id": "deadlines",
           "label": "Submission deadline for each assignment",
           "levels": [
+            "undergraduate",
             "graduate"
           ],
           "kind": "required",
@@ -394,7 +413,8 @@
             "submission dates?"
           ],
           "detect_cs": [],
-          "note": ""
+          "note": "",
+          "level_kinds": {}
         },
         {
           "id": "extension-policy",
@@ -409,12 +429,14 @@
             "make-?\\s?up (?:work|assignments?)"
           ],
           "detect_cs": [],
-          "note": ""
+          "note": "",
+          "level_kinds": {}
         },
         {
           "id": "assignments-linked-outcomes",
           "label": "Assignments linked to the learning outcome(s) they assess",
           "levels": [
+            "undergraduate",
             "graduate"
           ],
           "kind": "required",
@@ -422,10 +444,14 @@
             "(?:assess|measur|address|align|evaluat|map)\\w*\\s+(?:\\w+\\s+){0,3}(?:outcomes?|objectives?|SLOs?)\\b",
             "(?:outcomes?|objectives?|SLOs?)\\s+(?:\\w+\\s+){0,3}(?:assessed|addressed|measured|met)\\b",
             "\\bS?LOs?\\s*#?\\s*\\d",
-            "\\[[^\\]]{0,80}(?:assignment|discussion|paper|exam|essay|project|presentation|annotation|quiz|bibliograph|brief|report|homework)[^\\]]{0,80}\\]"
+            "\\[[^\\]]{0,80}(?:assignment|discussion|paper|exam|essay|project|presentation|annotation|quiz|bibliograph|brief|report|homework)[^\\]]{0,80}\\]",
+            "methods?\\s+of\\s+assessment",
+            "how\\s+(?:i|we)\\s+will\\s+assess",
+            "(?:outcomes?|objectives?|skills)\\s+(?:will\\s+be\\s+|are\\s+|is\\s+)?assessed\\s+(?:through|by|via|in|with)\\b"
           ],
           "detect_cs": [],
-          "note": "Heuristic: looks for language tying assignments to outcomes (or assignment names in brackets after each outcome). Read the section to confirm."
+          "note": "Heuristic: looks for language tying assignments to outcomes (or assignment names in brackets after each outcome). Read the section to confirm.",
+          "level_kinds": {}
         }
       ]
     },
@@ -458,9 +484,8 @@
         "undergraduate": "required",
         "graduate": "required"
       },
-      "description": "How graded components combine into a final grade, relative weightings, a test make-up policy, the level of work required for each letter grade (or pass/fail), and a reminder of students' responsibility to participate in course evaluations. (The Incomplete Policy reference is a separate, dedicated element below -- split out because the two are governed by different, conflicting UB policies per level, and lumping them together obscured which specific part of a syllabus was actually missing.)",
+      "description": "How graded components combine into a final grade, relative weightings, a test make-up policy, the level of work required for each letter grade (or pass/fail). Both pages also ask, in a 'should' footnote, for a reminder about course evaluations; not checked since 2026-10-06 (Jeff's call). (The Incomplete Policy reference is a separate, dedicated element below -- split out because the two are governed by different, conflicting UB policies per level, and lumping them together obscured which specific part of a syllabus was actually missing.)",
       "detect": [
-        "course evaluation",
         "grade breakdown",
         "grading scale",
         "final grade scale",
@@ -474,6 +499,7 @@
           "id": "grade-combination",
           "label": "How graded activities combine into the final grade",
           "levels": [
+            "undergraduate",
             "graduate"
           ],
           "kind": "required",
@@ -484,12 +510,14 @@
             "final grade (?:is|will be) (?:calculated|determined|based|computed)"
           ],
           "detect_cs": [],
-          "note": "Also counts as found when the grading-weight check finds percentages summing to 100%."
+          "note": "Also counts as found when the grading-weight check finds percentages summing to 100%.",
+          "level_kinds": {}
         },
         {
           "id": "grade-standards",
           "label": "Level of work needed for each letter grade (or the pass standard)",
           "levels": [
+            "undergraduate",
             "graduate"
           ],
           "kind": "required",
@@ -504,22 +532,8 @@
           "detect_cs": [
             "\\bA-?\\s*:[\\s\\S]{1,400}?\\bB[+-]?\\s*:"
           ],
-          "note": ""
-        },
-        {
-          "id": "course-evaluations",
-          "label": "Reminder of students' responsibility to complete course evaluations",
-          "levels": [
-            "graduate"
-          ],
-          "kind": "required",
-          "detect": [
-            "course\\s+evaluations?",
-            "evaluation process",
-            "teaching evaluations?"
-          ],
-          "detect_cs": [],
-          "note": ""
+          "note": "",
+          "level_kinds": {}
         },
         {
           "id": "grade-method",
@@ -536,7 +550,8 @@
             "pass\\s*/\\s*fail"
           ],
           "detect_cs": [],
-          "note": ""
+          "note": "",
+          "level_kinds": {}
         },
         {
           "id": "curve",
@@ -550,22 +565,28 @@
             "\\bcurving\\b"
           ],
           "detect_cs": [],
-          "note": ""
+          "note": "",
+          "level_kinds": {}
         },
         {
           "id": "makeup-tests",
           "label": "Make-up policy for tests",
           "levels": [
+            "undergraduate",
             "graduate"
           ],
           "kind": "suggested",
           "detect": [
-            "make-?\\s?up",
-            "missed (?:exams?|tests?|quiz)",
+            "make-?\\s?ups?\\s+(?:exams?|tests?|quiz(?:zes)?|polic|assignments?|work)",
+            "(?:exams?|tests?|quiz(?:zes)?|assignments?|work)\\s+(?:can|may|will)\\s+(?:only\\s+)?be\\s+made\\s+up",
+            "missed (?:exams?|tests?|quiz|work)",
             "\\bretakes?\\b"
           ],
           "detect_cs": [],
-          "note": ""
+          "note": "",
+          "level_kinds": {
+            "undergraduate": "if_applicable"
+          }
         }
       ]
     },
@@ -617,7 +638,67 @@
       ],
       "texts": {},
       "note": "Required on undergrad page, only optional on grad page -- not a real conflict, just an asymmetric floor.",
-      "items": []
+      "items": [
+        {
+          "id": "schedule-full-term",
+          "label": "Schedule covers the whole semester (all 15 weeks)",
+          "levels": [
+            "undergraduate"
+          ],
+          "kind": "required",
+          "detect": [
+            "\\bweek\\s*(?:1[4-6]|fourteen|fifteen|sixteen)\\b",
+            "\\bfinals?\\s+week\\b",
+            "\\bfinal\\s+exam(?:ination)?s?\\s+(?:week|period)\\b",
+            "\\breading\\s+days?\\b",
+            "\\b(?:dec(?:ember)?|may)\\.?\\s+\\d{1,2}\\b",
+            "\\b(?:12|5)/(?:[12]\\d|3[01]|0?[1-9])\\b",
+            "\\b\\d{1,2}[-\\s](?:dec(?:ember)?|may)\\b(?!\\s+(?:be|not|also|have|need|use|take|want|vary|change)\\b)"
+          ],
+          "detect_cs": [],
+          "note": "Heuristic: looks for a week 14-16 entry, finals week, or December/May dates. The undergraduate page allows a shorter schedule for summer and winter sessions.",
+          "level_kinds": {}
+        },
+        {
+          "id": "schedule-accountable",
+          "label": "What students are accountable for (readings, lectures, etc.)",
+          "levels": [
+            "undergraduate"
+          ],
+          "kind": "required",
+          "detect": [
+            "\\bread(?:ing|ings)?\\b",
+            "\\bch(?:apters?|s?\\.)\\s*\\d",
+            "\\bpp?\\.\\s*\\d",
+            "\\blectures?\\b",
+            "\\btopics?\\b",
+            "\\bwatch\\b",
+            "\\bview\\b"
+          ],
+          "detect_cs": [],
+          "note": "",
+          "level_kinds": {}
+        },
+        {
+          "id": "schedule-deadlines",
+          "label": "Assignment and exam dates in the schedule",
+          "levels": [
+            "undergraduate"
+          ],
+          "kind": "required",
+          "detect": [
+            "\\bdue\\b",
+            "\\bdeadlines?\\b",
+            "\\bexams?\\b",
+            "\\bmidterms?\\b",
+            "\\bquiz(?:zes)?\\b",
+            "\\bsubmit\\b"
+          ],
+          "detect_cs": [],
+          "note": "",
+          "level_kinds": {}
+        }
+      ]
     },
     {
       "id": "generative-ai-tools",
@@ -653,6 +734,7 @@
           "id": "ai-specific-limits",
           "label": "AI statement gives specific permitted/prohibited uses",
           "levels": [
+            "undergraduate",
             "graduate"
           ],
           "kind": "required",
@@ -663,7 +745,8 @@
             "\\buse\\s+(?:of\\s+)?(?:generative\\s+)?(?:AI|chatgpt)\\b(?:\\s+[\\w-]+){0,3}?\\s+(?:to|for|when|on|in|during)\\b"
           ],
           "detect_cs": [],
-          "note": "Only checks that permission/limit language appears near the AI statement. Whether it is specific enough (not vague) needs a human read."
+          "note": "Only checks that permission/limit language appears near the AI statement. Whether it is specific enough (not vague) needs a human read.",
+          "level_kinds": {}
         }
       ]
     },
@@ -693,7 +776,25 @@
         ]
       },
       "note": "CONFLICT: these are two different policy documents (Undergraduate vs. Graduate Academic Integrity Policy), not just two phrasings of the same one -- undergraduate students in this course are bound by the first, graduate students by the second. A combined syllabus likely needs to reference/include both, not pick one.",
-      "items": []
+      "items": [
+        {
+          "id": "integrity-policy-reference",
+          "label": "Refers students to UB's undergraduate Academic Integrity policy",
+          "levels": [
+            "undergraduate"
+          ],
+          "kind": "required",
+          "detect": [
+            "\\b(?:the|ub['’]?s?|university['’]?s?|undergraduate|our)\\s+academic\\s+integrity\\s+polic",
+            "policies\\s+and\\s+procedures\\s+on\\s+academic\\s+integrity",
+            "navoid=1162#(?:preamble|academic-integrity)",
+            "buffalo\\.edu/academic-integrity"
+          ],
+          "detect_cs": [],
+          "note": "",
+          "level_kinds": {}
+        }
+      ]
     },
     {
       "id": "accessibility-resources",
@@ -721,7 +822,7 @@
           "If you have any disability which requires reasonable accommodations to enable you to participate in this course, please contact the Office of Accessibility Resources in 60 Capen Hall, 716-645-2608 and also the instructor of this course during the first week of class. The office will provide you with information and review appropriate arrangements for reasonable accommodations."
         ]
       },
-      "note": "Low-severity: wording differs but the undergrad text is a superset of the grad text's content (same office/room/phone/policy, plus one extra sentence) -- using the undergrad version for both populations is defensible, unlike the academic-integrity conflict above where the two texts point at genuinely different policy documents.",
+      "note": "Low-severity: wording differs but the undergrad text is a superset of the grad text's content (same office/room/phone/policy, plus one extra sentence) -- using the undergrad version for both populations is defensible, unlike the academic-integrity conflict above where the two texts point at genuinely different policy documents. The checker holds a combined course to the undergrad text for this reason (OFFICIAL_STATEMENTS).",
       "items": []
     },
     {
@@ -880,20 +981,39 @@
   ],
   "statements": [
     {
+      "element_id": "accessibility-resources",
+      "level": "undergraduate",
+      "source": "UB's undergraduate syllabus policy",
+      "title": "Accessibility Resources statement",
+      "text": "If you have any disability that requires reasonable accommodations to enable you to participate in this course, please contact the Office of Accessibility Resources in 60 Capen Hall at 716-645-2608 and the instructor of this course during the first week of class. The office will provide you with information and review appropriate arrangements for reasonable accommodations, as outlined on the Accessibility Resources website.",
+      "red_flags": [],
+      "variant_notes": [
+        {
+          "text": "If you have any disability which requires reasonable accommodations to enable you to participate in this course, please contact the Office of Accessibility Resources in 60 Capen Hall, 716-645-2608 and also the instructor of this course during the first week of class. The office will provide you with information and review appropriate arrangements for reasonable accommodations.",
+          "message": "This is the Graduate School's version of the statement, which is fine for graduate students. Undergraduates must get the undergraduate version, which also covers graduate students."
+        }
+      ]
+    },
+    {
       "element_id": "academic-integrity",
       "level": "graduate",
+      "source": "the Graduate School",
       "title": "Academic Integrity statement",
       "text": "Academic integrity is a fundamental university value. Through the honest completion of academic work, students sustain the integrity of the university and of themselves while facilitating the university's imperative for the transmission of knowledge and culture based upon the generation of new and innovative ideas. For more information, please refer to the Graduate Academic Integrity policy.",
       "red_flags": [
         {
           "pattern": "\\bundergrad(?:uate)?\\b[\\s\\S]{0,60}?(?:catalog|integrity|polic)",
-          "message": "Points students to an undergraduate academic integrity policy; graduate students are governed by the Graduate Academic Integrity policy."
+          "message": "Points students to an undergraduate academic integrity policy; graduate students are governed by the Graduate Academic Integrity policy.",
+          "skip_if_levels": [
+            "undergraduate"
+          ]
         }
       ]
     },
     {
       "element_id": "accessibility-resources",
       "level": "graduate",
+      "source": "the Graduate School",
       "title": "Accessibility Resources statement",
       "text": "If you have any disability which requires reasonable accommodations to enable you to participate in this course, please contact the Office of Accessibility Resources in 60 Capen Hall, 716-645-2608 and also the instructor of this course during the first week of class. The office will provide you with information and review appropriate arrangements for reasonable accommodations.",
       "red_flags": []
@@ -919,6 +1039,8 @@
     ],
     "course-materials": [
       "(?:course|required|reading)\\s+materials?",
+      "(?:required|course)\\s+texts?",
+      "texts?\\s+and\\s+(?:reading\\s+)?materials",
       "\\bmaterials\\b",
       "\\btexts?\\b",
       "\\btextbooks?\\b",
@@ -956,6 +1078,7 @@
       "\\bincompletes?\\b"
     ],
     "academic-content": [
+      "academic\\s+content",
       "(?:course|weekly|class)\\s+(?:schedule|calendar|outline|topics)",
       "\\bschedule\\b",
       "\\bcalendar\\b"
@@ -1016,6 +1139,18 @@
   "heading_exclude": {
     "learning-outcomes": [
       "\\bprogram\\b"
+    ],
+    "course-materials": [
+      "\\bprotect",
+      "\\bdistribut",
+      "\\bdisclaimer\\b",
+      "\\bcopyright\\b",
+      "\\breflections?\\b"
+    ],
+    "grading-policy": [
+      "\\bgrievances?\\b",
+      "\\bappeals?\\b",
+      "\\bdisputes?\\b"
     ]
   },
   "heading_examples": {
@@ -1128,10 +1263,6 @@
       "looked_for": "\"students will be able to\", \"you will ...\" or \"by the end of the course\"",
       "scope": "section"
     },
-    "outcomes-program-link": {
-      "looked_for": "\"program learning outcomes\", \"program goals\", \"curriculum map\" or \"degree program\"",
-      "scope": "section"
-    },
     "deadlines": {
       "looked_for": "\"due\" or \"deadline\"",
       "scope": "section"
@@ -1141,7 +1272,7 @@
       "scope": "section"
     },
     "assignments-linked-outcomes": {
-      "looked_for": "wording such as \"assesses outcome 2\", \"SLO 1\", or assignment names in brackets after each outcome",
+      "looked_for": "wording such as \"assesses outcome 2\", \"SLO 1\", a \"Method of Assessment\" column, or assignment names in brackets after each outcome",
       "scope": "section"
     },
     "grade-combination": {
@@ -1151,10 +1282,6 @@
     "grade-standards": {
       "looked_for": "a grading scale (\"A = 93-100\", \"90% and above\") or a description of each letter grade (\"A: ...\", \"B+: ...\")",
       "scope": "section"
-    },
-    "course-evaluations": {
-      "looked_for": "\"course evaluations\" or \"evaluation process\"",
-      "scope": "document"
     },
     "grade-method": {
       "looked_for": "\"letter grades\", \"A-F\", \"S/U\" or \"pass/fail\"",
@@ -1170,6 +1297,22 @@
     },
     "ai-specific-limits": {
       "looked_for": "permission or limit wording near the AI statement (\"not allowed\", \"may use ... for\", \"do not use AI to\")",
+      "scope": "section"
+    },
+    "schedule-full-term": {
+      "looked_for": "a \"Week 15\" (or 14/16) entry, finals week, or December/May dates",
+      "scope": "section"
+    },
+    "schedule-accountable": {
+      "looked_for": "readings, chapters, page ranges, lectures or topics",
+      "scope": "section_only"
+    },
+    "schedule-deadlines": {
+      "looked_for": "\"due\", \"deadline\", exams or quizzes",
+      "scope": "section_only"
+    },
+    "integrity-policy-reference": {
+      "looked_for": "\"the (undergraduate) Academic Integrity Policy\" or a link to it; a pointer to the Graduate policy alone does not count",
       "scope": "section"
     }
   }

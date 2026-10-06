@@ -1538,8 +1538,93 @@ function courseDetailLines(c, e) {
   return lines;
 }
 
+// Comment text for the annotated PDF and Word file. The comment sits beside
+// the section it's about, so it skips where the section was found and how
+// the checker decided, and says what to add or change instead. The
+// on-screen report keeps its fuller wording (elementDetailLines), which the
+// Python parity test pins; this text is browser-only.
+const quoted = (s) => `"${s}"`;
+
+function noteHeadline(e) {
+  const st = e.statement;
+  if (e.status === "missing") return `${e.title}: required section not found`;
+  if (e.status === "incomplete") return `${e.title}: some required items are missing`;
+  if (e.status === "wording" && st && st.status === "verbatim") return `${e.title}: uses the required wording, but see below`;
+  if (e.status === "wording") return `${e.title}: wording differs from the required statement`;
+  return `${e.title}: ${STATUS_LABELS[e.status]}`;
+}
+
+function addSectionAdvice(e) {
+  const examples = ((standardsCache && standardsCache.heading_examples[e.id]) || []).map(quoted).join(" or ");
+  return `Add a section${examples ? ` headed ${examples}` : ""}. If the content is already here under another heading, renaming the heading will help reviewers find it.`;
+}
+
+function noteDiffLine(d) {
+  const inContext = (mid) => quoted(`${d.before ? "..." + d.before + " " : ""}${mid}${d.after ? " " + d.after + "..." : ""}`);
+  if (d.type === "missing") return `- Leaves out "${d.official}". Required text: ${inContext(d.official)}`;
+  if (d.type === "added") return `- Adds "${d.yours}", which isn't in the required text: ${inContext(d.yours)}`;
+  return `- Says "${d.yours}" where the required text says "${d.official}": ${inContext(d.official)}`;
+}
+
 function annotationLines(c, e) {
-  return [`${e.title}: ${STATUS_LABELS[e.status]}`, e.summary, ...courseDetailLines(c, e)];
+  const lines = [noteHeadline(e)];
+  if (e.status === "missing") lines.push(addSectionAdvice(e));
+
+  const missingItems = e.items.filter((r) => r.status === "missing");
+  if (missingItems.length) {
+    lines.push("", "Please add:");
+    for (const r of missingItems) {
+      const d = standardsCache && standardsCache.item_details[r.id];
+      lines.push(`- ${r.label}.${d && d.looked_for ? ` The checker looked for ${d.looked_for}.` : ""}`);
+    }
+  }
+
+  const st = e.statement;
+  if (st && st.status !== "verbatim") {
+    lines.push("");
+    if (st.status === "not_found") {
+      lines.push("The Graduate School requires this statement word for word, and this section uses different wording. Please use the required text:");
+    } else {
+      lines.push(`The Graduate School requires this statement word for word. This version is close (${Math.floor(st.coverage * 100 + 0.5)}% matches) but differs:`);
+      for (const d of st.diffs) lines.push(noteDiffLine(d));
+      lines.push("", "Simplest fix: replace it with the required text:");
+    }
+    lines.push(quoted(st.official_text));
+    if (c.ocrUsed && st.diffs.length) lines.push(OCR_WORDING_CAVEAT);
+  }
+  if (st) {
+    for (const flag of st.red_flags) lines.push("", flag.message + (flag.evidence.page ? ` (${flag.evidence.page})` : ""));
+  }
+
+  const ifApplies = e.items.filter((r) => r.status === "worth_a_look").map((r) => r.label);
+  if (ifApplies.length) lines.push("", `Also, only if it applies to this course: ${ifApplies.join("; ")}.`);
+  const byHand = e.items.filter((r) => r.status === "check").map((r) => r.label);
+  if (byHand.length) lines.push("", `Not checked automatically; please confirm: ${byHand.join("; ")}.`);
+  return lines;
+}
+
+// Required-section counts in words, for the page-1 note.
+function noteCountsText(result) {
+  const phrases = {
+    complete: "complete",
+    incomplete: "missing some items",
+    wording: "with wording that differs from the required text",
+    missing: "not found",
+    unreadable: "unreadable",
+  };
+  const counts = {};
+  for (const e of result.elements) if (e.required) counts[e.status] = (counts[e.status] || 0) + 1;
+  return ["complete", "incomplete", "wording", "missing", "unreadable"]
+    .filter((s) => counts[s])
+    .map((s) => `${counts[s]} ${phrases[s]}`)
+    .join(", ");
+}
+
+// One note listing the required sections with nothing to anchor a note to.
+function unanchoredLines(sections) {
+  const lines = ["Required sections not found anywhere in this syllabus:"];
+  for (const e of sections) lines.push("", `- ${e.title}. ${addSectionAdvice(e)}`);
+  return lines;
 }
 
 function sectionsNeedingAttention(result) {
@@ -1606,6 +1691,15 @@ function rectsForRange(spans, start, end) {
   return rows;
 }
 
+// Note colors. PDF viewers (Acrobat, Preview) use a note's color as its
+// pop-up background too, so these are light tints that keep black text
+// readable; the headline wording, not the color, carries the status.
+const NOTE_COLORS = {
+  missing: [1, 0.8, 0.8], // light red
+  attention: [1, 0.9, 0.72], // light orange
+  info: [0.82, 0.9, 1], // light blue
+};
+
 function addPdfNote(doc, page, x, y, lines, color) {
   const { PDFHexString, PDFString } = PDFLib;
   const annot = doc.context.obj({
@@ -1644,7 +1738,7 @@ async function buildAnnotatedPdf(c) {
     const spans = (c.spans && c.spans[pageIndex]) || [];
     const length = e.heading ? Math.max(anchor.length, 1) : Math.min(Math.max(anchor.length, 1), 200);
     const rects = rectsForRange(spans, anchor.offset, anchor.offset + length);
-    const color = e.status === "missing" ? [0.65, 0, 0.1] : [0.9, 0.42, 0.33];
+    const color = e.status === "missing" ? NOTE_COLORS.missing : NOTE_COLORS.attention;
     if (rects.length) {
       for (const rc of rects) {
         page.drawRectangle({ x: rc.x0 - 1, y: rc.y - rc.h * 0.25, width: rc.x1 - rc.x0 + 2, height: rc.h * 1.2, color: rgb(1, 0.85, 0.2), opacity: 0.35 });
@@ -1657,17 +1751,19 @@ async function buildAnnotatedPdf(c) {
   }
   const firstSyllabus = original[Math.min(c.startPage, original.length - 1)];
   if (unanchored.length && firstSyllabus) {
-    const lines = ["Sections not found anywhere in this syllabus:"];
-    for (const e of unanchored) lines.push(`- ${e.title}: ${e.summary}`);
-    addPdfNote(doc, firstSyllabus, 4, firstSyllabus.getHeight() - 48, lines, [0.65, 0, 0.1]);
+    addPdfNote(doc, firstSyllabus, 4, firstSyllabus.getHeight() - 48, unanchoredLines(unanchored), NOTE_COLORS.missing);
   }
 
   // Summary page(s) at the END, so every page number in the notes still
   // matches the original file; a note on page 1 points to it.
   const summaryPageNumber = original.length + 1;
   addPdfNote(doc, original[0], 4, original[0].getHeight() - 26,
-    [`Syllabus checker: ${statusCountsText(c.result) || "see summary"}.`, `Full review summary on page ${summaryPageNumber}. Page numbers in every note refer to this file's original pages.`],
-    [0, 0.36, 0.73]);
+    [
+      `Syllabus checker results for the required sections: ${noteCountsText(c.result) || "see the summary"}.`,
+      "Each section that needs attention is highlighted and has a note like this one beside it.",
+      `A full summary is on page ${summaryPageNumber}, added at the end. Page numbers in the notes refer to this file's original pages.`,
+    ],
+    NOTE_COLORS.info);
   const [w, h] = [612, 792];
   const margin = 54;
   let page = doc.addPage([w, h]);
@@ -1799,7 +1895,7 @@ async function buildAnnotatedDocx(c) {
     else addComment(paraAt(anchor.offset), annotationLines(c, e));
   }
   if (unanchored.length) {
-    addComment(0, ["Sections not found anywhere in this syllabus:", ...unanchored.map((e) => `- ${e.title}: ${e.summary}`)]);
+    addComment(0, unanchoredLines(unanchored));
   }
 
   zip.file("word/document.xml", XML_DECL + serializer.serializeToString(docXml).replace(/^<\?xml[^>]*\?>\s*/, ""));

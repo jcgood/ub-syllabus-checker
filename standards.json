@@ -21,6 +21,7 @@
       ],
       "texts": {},
       "note": "",
+      "combined_only": false,
       "items": [
         {
           "id": "subject-code-number",
@@ -124,6 +125,7 @@
       ],
       "texts": {},
       "note": "",
+      "combined_only": false,
       "items": [
         {
           "id": "meeting-times",
@@ -259,6 +261,7 @@
       ],
       "texts": {},
       "note": "Detection only confirms a description section exists -- it cannot verify the text actually matches the catalog description, or that prerequisites are stated, without reading it. Cross-check by hand against the catalog (e.g. via find_duplicate_courses.py check-text).",
+      "combined_only": false,
       "items": [
         {
           "id": "official-description",
@@ -311,6 +314,7 @@
       ],
       "texts": {},
       "note": "",
+      "combined_only": false,
       "items": [
         {
           "id": "materials-location",
@@ -359,6 +363,7 @@
         ]
       },
       "note": "",
+      "combined_only": false,
       "items": [
         {
           "id": "outcomes-student-focused",
@@ -398,6 +403,7 @@
       ],
       "texts": {},
       "note": "",
+      "combined_only": false,
       "items": [
         {
           "id": "deadlines",
@@ -456,6 +462,40 @@
       ]
     },
     {
+      "id": "graduate-workload",
+      "title": "Additional Work for Graduate Students",
+      "levels": [
+        "graduate"
+      ],
+      "requirement": {
+        "graduate": "required"
+      },
+      "description": "For a dual- or cross-listed 4xx/5xx course: a clear explanation of the additional work graduate students are expected to do (extra recitation sections, extra projects, additional papers, etc.). Source: the Graduate School Policy Library, 'Dual- and Cross-Listed Undergraduate and Graduate Courses' (https://www.buffalo.edu/grad/succeed/current-students/policy-library.html; captured 2026-09-05 in policy-library/pages/gradschool-policy-library.txt, wording re-checked live 2026-10-06): it 'must be explained in the course syllabus'. Not on either syllabus page.",
+      "detect": [
+        "\\bgraduate\\s+students?\\s+(?:will|must|are\\s+(?:expected|required|asked)|need\\s+to|should|have\\s+to|also|additionally|in\\s+addition)\\b",
+        "\\bfor\\s+graduate\\s+students\\s*[,:]",
+        "\\b(?:additional|extra)\\s+(?:\\w+\\s+){0,4}(?:for|by)\\s+graduate\\s+students\\b",
+        "\\bstudents\\s+(?:enrolled|registered)\\s+in\\s+the\\s+(?:graduate|5\\d\\d)"
+      ],
+      "texts": {},
+      "note": "Applies only when both levels are checked (a dual-listed course). Detection is loose; confirm the syllabus actually describes work beyond the undergraduate requirements.",
+      "combined_only": true,
+      "items": [
+        {
+          "id": "graduate-workload-described",
+          "label": "The extra work for graduate students is spelled out (what, and how it is graded)",
+          "levels": [
+            "graduate"
+          ],
+          "kind": "manual",
+          "detect": [],
+          "detect_cs": [],
+          "note": "Check by hand that the syllabus says what graduate students do beyond the undergraduate requirements, not just that they are held to a higher standard.",
+          "level_kinds": {}
+        }
+      ]
+    },
+    {
       "id": "classroom-environment",
       "title": "Classroom Environment",
       "levels": [
@@ -471,6 +511,7 @@
       ],
       "texts": {},
       "note": "Required for graduate but not listed on the undergrad page.",
+      "combined_only": false,
       "items": []
     },
     {
@@ -494,6 +535,7 @@
       ],
       "texts": {},
       "note": "",
+      "combined_only": false,
       "items": [
         {
           "id": "grade-combination",
@@ -617,6 +659,7 @@
         ]
       },
       "note": "CONFLICT: for a combined UG/grad course, undergraduate students are bound by the Undergraduate Incomplete Policy and graduate students by the (different) Graduate Incomplete Policy -- a syllabus serving both populations likely needs to reference BOTH, not just one.",
+      "combined_only": false,
       "items": []
     },
     {
@@ -638,6 +681,7 @@
       ],
       "texts": {},
       "note": "Required on undergrad page, only optional on grad page -- not a real conflict, just an asymmetric floor.",
+      "combined_only": false,
       "items": [
         {
           "id": "schedule-full-term",
@@ -729,6 +773,7 @@
         ]
       },
       "note": "Required for graduate (Required Sections, as of 2026-10-01); optional on the undergrad page as of its 2026-08-08 capture. Example wording only, not mandated text -- adapt to the course.",
+      "combined_only": false,
       "items": [
         {
           "id": "ai-specific-limits",
@@ -776,6 +821,7 @@
         ]
       },
       "note": "CONFLICT: these are two different policy documents (Undergraduate vs. Graduate Academic Integrity Policy), not just two phrasings of the same one -- undergraduate students in this course are bound by the first, graduate students by the second. A combined syllabus likely needs to reference/include both, not pick one.",
+      "combined_only": false,
       "items": [
         {
           "id": "integrity-policy-reference",
@@ -823,6 +869,7 @@
         ]
       },
       "note": "Low-severity: wording differs but the undergrad text is a superset of the grad text's content (same office/room/phone/policy, plus one extra sentence) -- using the undergrad version for both populations is defensible, unlike the academic-integrity conflict above where the two texts point at genuinely different policy documents. The checker holds a combined course to the undergrad text for this reason (OFFICIAL_STATEMENTS).",
+      "combined_only": false,
       "items": []
     },
     {
@@ -842,6 +889,7 @@
       ],
       "texts": {},
       "note": "",
+      "combined_only": false,
       "items": []
     },
     {
@@ -862,6 +910,7 @@
       ],
       "texts": {},
       "note": "",
+      "combined_only": false,
       "items": []
     },
     {
@@ -891,6 +940,7 @@
         ]
       },
       "note": "Optional either way -- if adopted for a combined course, the graduate version's extra sanction language is the safer/more complete choice.",
+      "combined_only": false,
       "items": []
     },
     {
@@ -910,6 +960,7 @@
       ],
       "texts": {},
       "note": "",
+      "combined_only": false,
       "items": []
     },
     {
@@ -929,6 +980,7 @@
       ],
       "texts": {},
       "note": "",
+      "combined_only": false,
       "items": []
     },
     {
@@ -958,6 +1010,7 @@
         ]
       },
       "note": "Optional either way, but if adopted for a combined course, use the graduate version -- it's a strict superset (same core content plus the mandated-reporter disclosure the undergrad version omits).",
+      "combined_only": false,
       "items": []
     },
     {
@@ -976,6 +1029,7 @@
       ],
       "texts": {},
       "note": "Graduate-page-only; no undergrad equivalent.",
+      "combined_only": false,
       "items": []
     }
   ],
@@ -1060,6 +1114,11 @@
       "\\bassignments?\\b",
       "\\bassessments?\\b",
       "graded\\s+(?:work|components)"
+    ],
+    "graduate-workload": [
+      "\\bgraduate\\s+(?:course\\s+|student\\s+)?(?:requirements|expectations|assignments|work\\b|component)",
+      "(?:additional|extra)\\s+(?:requirements|work|assignments)\\s+for\\s+graduate",
+      "requirements\\s+for\\s+graduate\\s+students"
     ],
     "classroom-environment": [
       "classroom\\s+(?:environment|climate|community)",
@@ -1151,6 +1210,9 @@
       "\\bgrievances?\\b",
       "\\bappeals?\\b",
       "\\bdisputes?\\b"
+    ],
+    "course-requirements": [
+      "\\bgraduate\\b"
     ]
   },
   "heading_examples": {
@@ -1176,6 +1238,10 @@
     "classroom-environment": [
       "Classroom Environment",
       "Inclusive Learning Environment"
+    ],
+    "graduate-workload": [
+      "Graduate Course Requirements",
+      "Additional Requirements for Graduate Students"
     ],
     "grading-policy": [
       "Grading"
@@ -1310,6 +1376,10 @@
     "schedule-deadlines": {
       "looked_for": "\"due\", \"deadline\", exams or quizzes",
       "scope": "section_only"
+    },
+    "graduate-workload-described": {
+      "looked_for": "",
+      "scope": "section"
     },
     "integrity-policy-reference": {
       "looked_for": "\"the (undergraduate) Academic Integrity Policy\" or a link to it; a pointer to the Graduate policy alone does not count",

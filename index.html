@@ -211,7 +211,11 @@
       page's own list under each section (delivery mode, office hours, outcomes tied to
       assignments, a grading scale, a specific generative-AI statement, and so on). Two
       lines both pages only say "should" include are not checked: outcomes linked to the
-      program's curriculum map, and a reminder about course evaluations. Undergraduate syllabi are also checked for a weekly schedule that covers the
+      program's curriculum map, and a reminder about course evaluations. A requirement or line
+      that comes from only one level's page is labeled, e.g. "(graduate requirement)" or
+      "(undergraduate only)". A dual-listed 4xx/5xx course must also explain the additional
+      work graduate students do (Graduate School policy on dual- and cross-listed courses);
+      that is checked only when both levels apply. Undergraduate syllabi are also checked for a weekly schedule that covers the
       whole semester and for a pointer to the Academic Integrity policy. Lines the page
       marks "where applicable", or only says a section "may include", are listed under
       "Worth a Look" rather than counted as missing. Statements a page says must be
@@ -484,8 +488,29 @@ function checkPreciseCourseCode(firstPageText) {
 
 // ---- Required-element check, ported from check_syllabus.py / syllabus_standards.py ----
 function applicableLevels(element, levels) {
+  // combined_only: only for a dual-listed course (both levels checked)
+  if (element.combined_only && !["undergraduate", "graduate"].every((l) => levels.includes(l))) return [];
   return levels.filter((l) => element.levels.includes(l));
 }
+
+// Level labels (syllabus_standards.element_scope / item_scope).
+const LEVEL_NOUNS = { undergraduate: "undergraduates", graduate: "graduate students" };
+function elementScope(element) {
+  if (element.combined_only) return "graduate requirement for dual-listed courses";
+  const requiredBy = ["undergraduate", "graduate"].filter((l) => element.requirement[l] === "required");
+  return requiredBy.length === 1 ? `${requiredBy[0]} requirement` : null;
+}
+function itemScope(item) {
+  if (item.levels.length === 1) return `${item.levels[0]} only`;
+  const overrides = item.level_kinds || {};
+  const kinds = Object.fromEntries(item.levels.map((l) => [l, overrides[l] || item.kind]));
+  if (new Set(Object.values(kinds)).size > 1) {
+    const required = item.levels.filter((l) => kinds[l] === "required");
+    if (required.length === 1) return `required for ${LEVEL_NOUNS[required[0]]}`;
+  }
+  return null;
+}
+const scoped = (name, scope) => (scope ? `${name} (${scope})` : name);
 function isRequired(element, levels) {
   return levels.some((l) => element.requirement[l] === "required");
 }
@@ -997,7 +1022,7 @@ function analyzeSyllabus(pages, levels, isProposal, pageOffset, std, paged = tru
       const details = std.item_details[item.id];
       const proposal = isProposal ? details.proposal || null : null;
       const kind = itemKind(item, levels);
-      const result = { id: item.id, label: item.label, kind, status: null, where: null, evidence: null, why: "" };
+      const result = { id: item.id, label: item.label, kind, scope: itemScope(item), status: null, where: null, evidence: null, why: "" };
       if (kind === "manual") {
         result.status = "check";
         result.why = item.note;
@@ -1148,6 +1173,7 @@ function analyzeSyllabus(pages, levels, isProposal, pageOffset, std, paged = tru
     results.push({
       id: element.id,
       title: element.title,
+      scope: elementScope(element),
       required,
       status,
       how_found: how,
@@ -1186,7 +1212,7 @@ function elementSummary(element, status, how, e, missingItems, statement, std) {
   const found = `Found (${whereText(how, e)})`;
   const pct = (x) => Math.floor(x * 100 + 0.5);
   if (status === "incomplete") {
-    const names = missingItems.map((r) => r.label).join("; ");
+    const names = missingItems.map((r) => scoped(r.label, r.scope)).join("; ");
     const extra = statement && statement.status !== "verbatim" ? " The required statement wording also differs." : "";
     return `${found}, but missing: ${names}.${extra}`;
   }
@@ -1215,7 +1241,7 @@ function elementDetailLines(e, showText = false) {
   if (e.status === "unreadable") return out;
   for (const r of e.items) {
     if (r.status === "found" && !r.why) continue;
-    out.push(`${r.label}: ${ITEM_LABELS[r.status]}. ${r.why}`.trimEnd());
+    out.push(`${scoped(r.label, r.scope)}: ${ITEM_LABELS[r.status]}. ${r.why}`.trimEnd());
   }
   const st = e.statement;
   if (st && st.status !== "verbatim") {
@@ -1276,7 +1302,49 @@ function findGradingSection(text) {
   return text.slice(start, end);
 }
 
+// Fallback: weights stated beside each assignment, one per line (see
+// grading_check.py's WEIGHT_LINE_RE). Can only report "ok".
+const WEIGHT_LINE_RE = /^[ \t]*(?:[•▪●*-][ \t]*|\(?\d{1,2}[.)][ \t]*)?([A-Z][^\n%]{1,60}?)[ \t]*[(:\-–—][ \t]*(\d{1,3}(?:\.\d+)?)[ \t]?%/gm;
+const NOT_A_WEIGHT_LABEL_RE = /extra\s+credit|bonus|optional/i;
+
+function weightsByAssignment(text) {
+  const excluded = [];
+  const rangeRe = new RegExp(RANGE_PCT_RE.source, "g");
+  let rm;
+  while ((rm = rangeRe.exec(text)) !== null) excluded.push([rm.index, rm.index + rm[0].length]);
+  const weights = [];
+  const re = new RegExp(WEIGHT_LINE_RE.source, "gm");
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const label = m[1].trim();
+    const pctPos = m.index + m[0].lastIndexOf(m[2]);
+    if (excluded.some(([s, e]) => pctPos >= s && pctPos < e)) continue;
+    if (NOT_A_WEIGHT_LABEL_RE.test(label) || /^[A-F][+-]?$/.test(label)) continue;
+    const after = text.slice(m.index + m[0].length, m.index + m[0].length + 10);
+    if (/^\s*each\b/i.test(after)) continue;
+    weights.push(parseFloat(m[2]));
+  }
+  return weights;
+}
+
 function checkGradingWeights(text) {
+  const result = checkGradingSection(text);
+  // only when the section scan found no percentage at all (grading_check.py)
+  if (result.status !== "not_found" || result.percentages.length) return result;
+  const weights = weightsByAssignment(text);
+  const total = weights.reduce((a, b) => a + b, 0);
+  if (weights.length >= 2 && Math.abs(total - 100) <= GRADING_TOLERANCE) {
+    return {
+      status: "ok",
+      percentages: weights,
+      total,
+      message: `Grading weights stated with each assignment sum to ${total}% (found: ${weights.map((p) => `${p}%`).join(", ")}; extra credit not counted).`,
+    };
+  }
+  return result;
+}
+
+function checkGradingSection(text) {
   const section = findGradingSection(text);
   if (section === null) {
     return {
@@ -1557,7 +1625,7 @@ function renderResults(courses) {
       for (const e of r.elements.filter((x) => x.required)) {
         tb.appendChild(
           el("tr", {}, [
-            el("th", { text: e.title, attrs: { scope: "row" } }),
+            el("th", { text: scoped(e.title, e.scope), attrs: { scope: "row" } }),
             el("td", {}, [el("span", { className: `status status-${e.status}`, text: STATUS_LABELS[e.status] })]),
             el("td", { text: e.summary }),
           ])
@@ -1570,7 +1638,7 @@ function renderResults(courses) {
       if (detailed.length) {
         block.appendChild(el("h3", { text: "Details" }));
         for (const e of detailed) {
-          block.appendChild(el("h4", { text: `${e.title} — ${STATUS_LABELS[e.status]}` }));
+          block.appendChild(el("h4", { text: `${scoped(e.title, e.scope)} — ${STATUS_LABELS[e.status]}` }));
           const ul = el("ul", { className: "detail-list" });
           for (const line of courseDetailLines(c, e)) ul.appendChild(el("li", { text: line }));
           block.appendChild(ul);
@@ -1671,12 +1739,13 @@ function noteHeadline(e) {
   const st = e.statement;
   const t = tierOf(e);
   const tag = `${t.symbol} ${t.word}: `;
-  if (e.status === "missing") return `${tag}${e.title}: required section not found`;
-  if (e.status === "incomplete") return `${tag}${e.title}: some required items are missing`;
-  if (e.status === "wording" && st && st.status === "verbatim") return `${tag}${e.title}: uses the required wording, but see below`;
-  if (e.status === "wording") return `${tag}${e.title}: wording differs from the required statement`;
-  if (e.status === "complete") return `${tag}${e.title}: checked and complete`;
-  return `${tag}${e.title}: ${STATUS_LABELS[e.status]}`;
+  const title = scoped(e.title, e.scope);
+  if (e.status === "missing") return `${tag}${title}: required section not found`;
+  if (e.status === "incomplete") return `${tag}${title}: some required items are missing`;
+  if (e.status === "wording" && st && st.status === "verbatim") return `${tag}${title}: uses the required wording, but see below`;
+  if (e.status === "wording") return `${tag}${title}: wording differs from the required statement`;
+  if (e.status === "complete") return `${tag}${title}: checked and complete`;
+  return `${tag}${title}: ${STATUS_LABELS[e.status]}`;
 }
 
 function addSectionAdvice(e) {
@@ -1701,7 +1770,7 @@ function annotationLines(c, e) {
     lines.push("", "Please add:");
     for (const r of missingItems) {
       const d = standardsCache && standardsCache.item_details[r.id];
-      lines.push(`- ${r.label}.${d && d.looked_for ? ` The checker looked for ${d.looked_for}.` : ""}`);
+      lines.push(`- ${scoped(r.label, r.scope)}.${d && d.looked_for ? ` The checker looked for ${d.looked_for}.` : ""}`);
     }
   }
 
@@ -1724,9 +1793,9 @@ function annotationLines(c, e) {
     for (const flag of st.red_flags) lines.push("", flag.message + (flag.evidence.page ? ` (${flag.evidence.page})` : ""));
   }
 
-  const ifApplies = e.items.filter((r) => r.status === "worth_a_look").map((r) => r.label);
+  const ifApplies = e.items.filter((r) => r.status === "worth_a_look").map((r) => scoped(r.label, r.scope));
   if (ifApplies.length) lines.push("", `Also, only if it applies to this course: ${ifApplies.join("; ")}.`);
-  const byHand = e.items.filter((r) => r.status === "check").map((r) => r.label);
+  const byHand = e.items.filter((r) => r.status === "check").map((r) => scoped(r.label, r.scope));
   if (byHand.length) lines.push("", `Not checked automatically; please confirm: ${byHand.join("; ")}.`);
   return lines;
 }
@@ -1751,7 +1820,7 @@ function noteCountsText(result) {
 // One note listing the required sections with nothing to anchor a note to.
 function unanchoredLines(sections) {
   const lines = [`${TIERS.missing.symbol} ${TIERS.missing.word}: required sections not found anywhere in this syllabus:`];
-  for (const e of sections) lines.push("", `- ${e.title}. ${addSectionAdvice(e)}`);
+  for (const e of sections) lines.push("", `- ${scoped(e.title, e.scope)}. ${addSectionAdvice(e)}`);
   return lines;
 }
 
@@ -1784,7 +1853,7 @@ function summaryRows(c, symbols = true) {
   }
   for (const e of r.elements.filter((x) => x.required)) {
     const t = tierOf(e);
-    rows.push({ text: `${sym(t)}${t.word}: ${e.title}. ${e.summary}`, fill: t.fill });
+    rows.push({ text: `${sym(t)}${t.word}: ${scoped(e.title, e.scope)}. ${e.summary}`, fill: t.fill });
   }
   rows.push({ text: NOT_CHECKED_NOTE, fill: null });
   return rows;
@@ -2177,7 +2246,9 @@ async function buildAnnotatedDocx(c) {
       if (para) shadeCharacters(docXml, para.el, d.where.offset - para.start, d.where.offset - para.start + d.where.length, DIFF_WORD_HEX);
     }
   }
-  addComment(0, summaryLines(c));
+  // Kept short on purpose (Jeff, 2026-10-06); each section's own comment
+  // carries the details, and its author name carries the status.
+  addComment(0, ["These comments are from the UB Syllabus Compliance Checker, an automated screen. Please confirm each one against the syllabus."]);
   const unanchored = [];
   for (const e of required) {
     const t = tierOf(e);
@@ -2294,13 +2365,13 @@ async function buildDocx(courses) {
       }
       const rows = [new TableRow({ children: ["Section", "Status", "What the checker found"].map((t) => cell(t, true)) })];
       for (const e of r.elements.filter((x) => x.required)) {
-        rows.push(new TableRow({ children: [cell(e.title), cell(STATUS_LABELS[e.status], e.status !== "complete"), cell(e.summary)] }));
+        rows.push(new TableRow({ children: [cell(scoped(e.title, e.scope)), cell(STATUS_LABELS[e.status], e.status !== "complete"), cell(e.summary)] }));
       }
       children.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows }));
       for (const e of r.elements.filter((x) => x.required)) {
         const lines = courseDetailLines(c, e);
         if (!lines.length) continue;
-        children.push(new Paragraph({ text: `${e.title} — ${STATUS_LABELS[e.status]}`, heading: HeadingLevel.HEADING_3 }));
+        children.push(new Paragraph({ text: `${scoped(e.title, e.scope)} — ${STATUS_LABELS[e.status]}`, heading: HeadingLevel.HEADING_3 }));
         for (const line of lines) children.push(new Paragraph({ bullet: { level: 0 }, text: line }));
       }
       const included = r.elements.filter((e) => !e.required && e.status === "included").map((e) => e.title);

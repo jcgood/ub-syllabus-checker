@@ -1059,7 +1059,10 @@ function analyzeSyllabus(pages, levels, isProposal, pageOffset, std, paged = tru
           result.why = "Found outside this section " + cite(result.evidence.page, result.evidence.snippet, 90) + ".";
         }
         if (details.found_note) {
-          result.why = (result.why + " " + details.found_note).trim();
+          // a match only shows linking wording, so it goes on the "confirm by hand" list
+          result.status = "check";
+          if (!result.why) result.why = "Found " + cite(result.evidence.page, result.evidence.snippet, 90) + ".";
+          result.why += " " + details.found_note;
         }
         itemResults.push(result);
         continue;

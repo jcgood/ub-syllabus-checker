@@ -1802,7 +1802,7 @@ function annotationLines(c, e) {
   const ifApplies = e.items.filter((r) => r.status === "worth_a_look").map((r) => scoped(r.label, r.scope));
   if (ifApplies.length) lines.push("", `Also, only if it applies to this course: ${ifApplies.join("; ")}.`);
   const byHand = e.items.filter((r) => r.status === "check").map((r) => scoped(r.label, r.scope));
-  if (byHand.length) lines.push("", `Not checked automatically; please confirm: ${byHand.join("; ")}.`);
+  if (byHand.length) lines.push("", `Please confirm by hand: ${byHand.join("; ")}.`);
   return lines;
 }
 

@@ -2057,6 +2057,17 @@ function getJSZip() {
   return window.JSZip;
 }
 
+// Parse an XML part of a .docx. Some programs save it with a byte-order mark
+// before "<?xml"; Chrome accepts that but Safari doesn't, and a failed parse
+// used to look like an empty document ("can't read", BIO 444, 2026-10-07).
+function parseDocxXml(str, partName) {
+  const doc = new DOMParser().parseFromString(str.replace(/^﻿/, ""), "application/xml");
+  if (doc.getElementsByTagName("parsererror").length) {
+    throw new Error(`Could not read ${partName} in this Word file (the XML would not parse).`);
+  }
+  return doc;
+}
+
 // Paragraph text in document order. Each text node is credited to its
 // nearest enclosing <w:p>, so a text box nested inside a paragraph doesn't
 // duplicate text. Returns { text, paragraphs: [{start, end, el}] }.
@@ -2187,13 +2198,13 @@ async function buildAnnotatedDocx(c) {
   const zip = await JSZip.loadAsync(c.docxBuf.slice(0));
   const parser = new DOMParser();
   const serializer = new XMLSerializer();
-  const docXml = parser.parseFromString(await zip.file("word/document.xml").async("string"), "application/xml");
+  const docXml = parseDocxXml(await zip.file("word/document.xml").async("string"), "word/document.xml");
   const { paragraphs } = docxParagraphs(docXml);
 
   let commentsXml;
   const existing = zip.file("word/comments.xml");
   if (existing) {
-    commentsXml = parser.parseFromString(await existing.async("string"), "application/xml");
+    commentsXml = parseDocxXml(await existing.async("string"), "word/comments.xml");
   } else {
     commentsXml = parser.parseFromString(`<w:comments xmlns:w="${W_NS}"/>`, "application/xml");
   }
@@ -2507,7 +2518,7 @@ async function analyzeFile(file, options, pdfOverride = null) {
     const zip = await JSZip.loadAsync(buf.slice(0));
     const docFile = zip.file("word/document.xml");
     if (!docFile) throw new Error("This .docx has no word/document.xml (is it a Word file?)");
-    const xml = new DOMParser().parseFromString(await docFile.async("string"), "application/xml");
+    const xml = parseDocxXml(await docFile.async("string"), "word/document.xml");
     const { text } = docxParagraphs(xml);
     course.docxBuf = buf;
     course.startPage = 0;

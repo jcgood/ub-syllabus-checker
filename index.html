@@ -1058,6 +1058,9 @@ function analyzeSyllabus(pages, levels, isProposal, pageOffset, std, paged = tru
         if (result.where === "elsewhere") {
           result.why = "Found outside this section " + cite(result.evidence.page, result.evidence.snippet, 90) + ".";
         }
+        if (details.found_note) {
+          result.why = (result.why + " " + details.found_note).trim();
+        }
         itemResults.push(result);
         continue;
       }

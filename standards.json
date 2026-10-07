@@ -382,6 +382,27 @@
           "detect_cs": [],
           "note": "Phrasing check only; a bare bulleted list of verbs ('Analyze...') won't match.",
           "level_kinds": {}
+        },
+        {
+          "id": "assignments-linked-outcomes",
+          "label": "Each outcome linked to the assignment(s) that assess it",
+          "levels": [
+            "undergraduate",
+            "graduate"
+          ],
+          "kind": "required",
+          "detect": [
+            "(?:assess|measur|address|align|evaluat|map)\\w*\\s+(?:\\w+\\s+){0,3}(?:outcomes?|objectives?|SLOs?)\\b",
+            "(?:outcomes?|objectives?|SLOs?)\\s+(?:\\w+\\s+){0,3}(?:assessed|addressed|measured|met)\\b",
+            "\\bS?LOs?\\s*#?\\s*\\d",
+            "\\[[^\\]]{0,80}(?:assignment|discussion|paper|exam|essay|project|presentation|annotation|quiz|bibliograph|brief|report|homework)[^\\]]{0,80}\\]",
+            "methods?\\s+of\\s+assessment",
+            "how\\s+(?:i|we)\\s+will\\s+assess",
+            "(?:outcomes?|objectives?|skills)\\s+(?:will\\s+be\\s+|are\\s+|is\\s+)?assessed\\s+(?:through|by|via|in|with)\\b"
+          ],
+          "detect_cs": [],
+          "note": "Heuristic: looks for language tying assignments to outcomes (or assignment names in brackets after each outcome). Read the section to confirm.",
+          "level_kinds": {}
         }
       ]
     },
@@ -436,27 +457,6 @@
           ],
           "detect_cs": [],
           "note": "",
-          "level_kinds": {}
-        },
-        {
-          "id": "assignments-linked-outcomes",
-          "label": "Assignments linked to the learning outcome(s) they assess",
-          "levels": [
-            "undergraduate",
-            "graduate"
-          ],
-          "kind": "required",
-          "detect": [
-            "(?:assess|measur|address|align|evaluat|map)\\w*\\s+(?:\\w+\\s+){0,3}(?:outcomes?|objectives?|SLOs?)\\b",
-            "(?:outcomes?|objectives?|SLOs?)\\s+(?:\\w+\\s+){0,3}(?:assessed|addressed|measured|met)\\b",
-            "\\bS?LOs?\\s*#?\\s*\\d",
-            "\\[[^\\]]{0,80}(?:assignment|discussion|paper|exam|essay|project|presentation|annotation|quiz|bibliograph|brief|report|homework)[^\\]]{0,80}\\]",
-            "methods?\\s+of\\s+assessment",
-            "how\\s+(?:i|we)\\s+will\\s+assess",
-            "(?:outcomes?|objectives?|skills)\\s+(?:will\\s+be\\s+|are\\s+|is\\s+)?assessed\\s+(?:through|by|via|in|with)\\b"
-          ],
-          "detect_cs": [],
-          "note": "Heuristic: looks for language tying assignments to outcomes (or assignment names in brackets after each outcome). Read the section to confirm.",
           "level_kinds": {}
         }
       ]
@@ -1339,7 +1339,8 @@
     },
     "assignments-linked-outcomes": {
       "looked_for": "wording such as \"assesses outcome 2\", \"SLO 1\", a \"Method of Assessment\" column, or assignment names in brackets after each outcome",
-      "scope": "section"
+      "scope": "section",
+      "found_note": "Confirm by hand that every outcome names a graded assignment or test (readings or \"discussion if on topic\" are not an assessment)."
     },
     "grade-combination": {
       "looked_for": "percentages, points or weights for the graded work",

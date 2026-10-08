@@ -267,7 +267,6 @@
 <footer>
   <p>Client-side only — built with <a href="https://mozilla.github.io/pdf.js/">pdf.js</a>,
   <a href="https://pdf-lib.js.org/">pdf-lib</a>,
-  <a href="https://docx.js.org/">docx.js</a>,
   <a href="https://stuk.github.io/jszip/">JSZip</a>, and (only if you choose OCR)
   <a href="https://tesseract.projectnaptha.com/">tesseract.js</a>. Source: UB Academic Affairs internal tooling.</p>
 </footer>
@@ -280,10 +279,6 @@
 // functions only (see getJSZip), so tests/run_js_tests.mjs can load this
 // code under plain Node.
 import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.min.mjs";
-import {
-  Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow,
-  TableCell, WidthType, AlignmentType,
-} from "https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.mjs";
 import * as PDFLib from "https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.esm.min.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc =
@@ -1575,6 +1570,19 @@ function renderResults(courses) {
       return;
     }
     const r = c.result;
+    const annotLabel = c.isDocx ? "Download annotated Word file" : "Download annotated PDF";
+    const annotBtn = el("button", { text: annotLabel, attrs: { type: "button", "aria-describedby": `annot-help-${courseIndex}` } });
+    annotBtn.addEventListener("click", () => downloadAnnotated(c));
+    block.appendChild(el("div", { className: "button-row" }, [annotBtn]));
+    block.appendChild(
+      el("p", {
+        className: "page-info",
+        attrs: { id: `annot-help-${courseIndex}` },
+        text: c.isDocx
+          ? "A copy of the Word file with a comment on each required section, plus a summary comment at the top."
+          : "A copy of the PDF with a highlight and a note beside each required section, plus a summary page at the end.",
+      })
+    );
     block.appendChild(
       el("p", {
         className: "page-info",
@@ -1676,27 +1684,9 @@ function renderResults(courses) {
       block.appendChild(el("p", { text: "No accessibility issues detected in the syllabus pages (degraded check)." }));
     }
 
-    const row = el("div", { className: "button-row" });
-    const annotLabel = c.isDocx ? "Download annotated Word file" : "Download annotated PDF";
-    const annotBtn = el("button", { text: annotLabel, className: "secondary", attrs: { type: "button", "aria-describedby": `annot-help-${courseIndex}` } });
-    annotBtn.addEventListener("click", () => downloadAnnotated(c));
-    row.appendChild(annotBtn);
-    block.appendChild(row);
-    block.appendChild(
-      el("p", {
-        className: "page-info",
-        attrs: { id: `annot-help-${courseIndex}` },
-        text: c.isDocx
-          ? "A copy of the Word file with a comment on each section that needs attention, plus a summary comment at the top."
-          : "A copy of the PDF with a highlight plus a note beside each section that needs attention, and a summary page added at the end.",
-      })
-    );
     resultsSection.appendChild(block);
   });
 
-  const reportBtn = el("button", { text: "Download report (.docx)", className: "secondary", attrs: { type: "button", id: "download-btn" } });
-  reportBtn.addEventListener("click", () => downloadDocx(courses));
-  resultsSection.appendChild(el("div", { className: "button-row" }, [reportBtn]));
 }
 
 // ---- Shared note text for annotations ----
@@ -2322,100 +2312,6 @@ async function downloadAnnotated(c) {
   }
 }
 
-// ---- docx report (docx.js) ----
-async function buildDocx(courses) {
-  const children = [];
-  const para = (text, opts = {}) => new Paragraph({ children: [new TextRun({ text, ...opts })] });
-  const allLevels = [...new Set(courses.flatMap((c) => (c.result && c.result.levels) || []))];
-  const reportTitle = allLevels.length === 1 && allLevels[0] === "graduate" ? "Graduate Syllabus Review" : "Syllabus Review";
-  children.push(new Paragraph({ text: reportTitle, heading: HeadingLevel.TITLE, alignment: AlignmentType.CENTER }));
-  children.push(
-    new Paragraph({
-      alignment: AlignmentType.CENTER,
-      children: [new TextRun({ text: `Syllabus-element and PDF accessibility findings — ${courses.length} course(s)`, italics: true })],
-    })
-  );
-  children.push(
-    para(
-      `Scope: syllabus content only, checked against ${allLevels.length ? guidelinesName(allLevels) : "UB's syllabus guidelines"}, according to each course's level. Any “New Graduate Course Approval Request Form” cover pages, and any printed emails after them, are excluded.` +
-      " Each required section is marked Complete, Incomplete (present but missing specific lines), Wording differs (a mandated statement isn't the required text), Missing, or Can't read (no readable text). This browser-based tool's accessibility screen is DEGRADED (no full PDF/UA-1 validation). Confirm findings against the actual document before acting on them."
-    )
-  );
-  children.push(para(NOT_CHECKED_NOTE));
-
-  const cell = (t, bold = false) => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: t, bold })] })] });
-  children.push(new Paragraph({ text: "Summary", heading: HeadingLevel.HEADING_1 }));
-  const summaryRows = [new TableRow({ children: ["Course", "Required sections", "Grading weights", "Accessibility issues"].map((t) => cell(t, true)) })];
-  for (const c of courses) {
-    const accCount = c.error ? 0 : c.accessibilityFindings.reduce((s, f) => s + f.count, 0);
-    summaryRows.push(
-      new TableRow({
-        children: [
-          cell(c.label),
-          cell(c.error ? "n/a" : statusCountsText(c.result)),
-          cell(c.error ? "n/a" : GRADING_LABELS[c.gradingCheck.status]),
-          cell(c.error || c.isDocx ? "n/a" : String(accCount)),
-        ],
-      })
-    );
-  }
-  children.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: summaryRows }));
-
-  for (const c of courses) {
-    children.push(new Paragraph({ text: c.label, heading: HeadingLevel.HEADING_1 }));
-    if (c.error) {
-      children.push(para("Could not be checked: " + c.error));
-      continue;
-    }
-    const r = c.result;
-    children.push(para(c.levelsReason, { italics: true }));
-    const pn = proposalNote(c);
-    if (pn) children.push(para(pn, { italics: true }));
-    if (c.ocrUsed) children.push(para(`Text on ${c.ocrUsed} page(s) was read with OCR.`, { italics: true }));
-
-    children.push(new Paragraph({ text: "Syllabus Sections", heading: HeadingLevel.HEADING_2 }));
-    if (r.readability.status === "unreadable") {
-      children.push(new Paragraph({ children: [new TextRun({ text: "Can't read this syllabus. ", bold: true }), new TextRun(unreadableMessage(c))] }));
-    } else {
-      if (r.readability.status === "partial") {
-        children.push(para(`${r.low_text_pages.join(", ")} have little or no readable text; anything on those pages wasn't checked.`));
-      }
-      const rows = [new TableRow({ children: ["Section", "Status", "What the checker found"].map((t) => cell(t, true)) })];
-      for (const e of r.elements.filter((x) => x.required)) {
-        rows.push(new TableRow({ children: [cell(scoped(e.title, e.scope)), cell(STATUS_LABELS[e.status], e.status !== "complete"), cell(e.summary)] }));
-      }
-      children.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows }));
-      for (const e of r.elements.filter((x) => x.required)) {
-        const lines = courseDetailLines(c, e);
-        if (!lines.length) continue;
-        children.push(new Paragraph({ text: `${scoped(e.title, e.scope)} — ${STATUS_LABELS[e.status]}`, heading: HeadingLevel.HEADING_3 }));
-        for (const line of lines) children.push(new Paragraph({ bullet: { level: 0 }, text: line }));
-      }
-      const included = r.elements.filter((e) => !e.required && e.status === "included").map((e) => e.title);
-      children.push(para("Optional sections included: " + (included.join(", ") || "none") + "."));
-    }
-
-    if (c.gradingCheck.status !== "not_found") {
-      children.push(new Paragraph({ text: "Grading Weight Check", heading: HeadingLevel.HEADING_2 }));
-      children.push(para(c.gradingCheck.message));
-    }
-    if (c.codeNote && r.readability.status !== "unreadable") {
-      children.push(new Paragraph({ text: "Course Code Format (informational)", heading: HeadingLevel.HEADING_2 }));
-      children.push(para(c.codeNote));
-    }
-    children.push(new Paragraph({ text: "PDF Accessibility (ADA / PDF-UA) Issues — degraded check", heading: HeadingLevel.HEADING_2 }));
-    if (c.accessibilityNote) children.push(para(c.accessibilityNote));
-    else if (c.accessibilityFindings.length) {
-      for (const f of c.accessibilityFindings) {
-        children.push(new Paragraph({ bullet: { level: 0 }, children: [new TextRun(f.label + " "), new TextRun({ text: `(${f.count} occurrence(s))`, italics: true })] }));
-      }
-    } else children.push(para("No accessibility issues detected in the syllabus pages (degraded check)."));
-  }
-
-  const doc = new Document({ sections: [{ children }] });
-  return Packer.toBlob(doc);
-}
-
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -2425,17 +2321,6 @@ function downloadBlob(blob, filename) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-async function downloadDocx(courses) {
-  setStatus("Building .docx report…");
-  try {
-    downloadBlob(await buildDocx(courses), "syllabus_review_report.docx");
-    setStatus("Report downloaded.");
-  } catch (err) {
-    console.error(err);
-    setStatus("Could not build the .docx report: " + err.message, true);
-  }
 }
 
 // ---- OCR (tesseract.js, loaded only when asked for) ----
